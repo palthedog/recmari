@@ -1,0 +1,28 @@
+# Video files which should not be shared publicly
+/videos/
+
+# Claude Code local settings
+**/.claude/*.local.*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Debug output
+/result.debug/
+
+# Rust
+/target
+Cargo.lock

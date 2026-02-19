@@ -1,0 +1,62 @@
+syntax = "proto3";
+package recmari;
+
+// 1マッチ = 2ラウンド先取の試合1回分。解析の基本単位
+message Match {
+  // このマッチの解析元ソース情報
+  SourceMetadata source = 1;
+  // このマッチに含まれるラウンド（時系列順、通常2〜3ラウンド）
+  repeated Round rounds = 2;
+}
+
+// 解析ソースの情報。マッチがどこから抽出されたかを示す
+message SourceMetadata {
+  oneof source {
+    // 録画済み動画ファイルからの解析
+    VideoFileSource video_file = 1;
+    // リアルタイム画面キャプチャからの解析（将来）
+    ScreenCaptureSource screen_capture = 2;
+  }
+}
+
+message VideoFileSource {
+  // 動画ファイルのパス (例: "C:/replays/session01.mp4")
+  string file_path = 1;
+  // このマッチが動画内で始まる秒数 (例: 動画の3分目から → 180.0)
+  double start_seconds = 2;
+}
+
+message ScreenCaptureSource {
+  // キャプチャを開始した日時 (RFC 3339形式、例: "2026-02-20T21:30:00+09:00")
+  string captured_at = 1;
+}
+
+// 1ラウンド = 体力が0になるかタイムアップまでの1戦
+message Round {
+  // Match 内でのラウンド番号（0始まり）
+  uint32 round_index = 1;
+  // このラウンド中にサンプリングされたフレームの解析データ（時系列順）
+  repeated FrameData frames = 2;
+}
+
+// 1フレームから抽出されたゲーム状態
+message FrameData {
+  // ソース内の絶対フレーム番号（0始まり。動画先頭からの通し番号）
+  uint32 frame_number = 1;
+  // ソース先頭からの経過秒数 (例: frame 120 @ 60fps → 2.0)
+  double timestamp_seconds = 2;
+  // 1P（画面左側）の状態
+  PlayerState player1 = 3;
+  // 2P（画面右側）の状態
+  PlayerState player2 = 4;
+}
+
+// プレイヤーの1フレームにおける状態
+message PlayerState {
+  // 残り体力の割合。1.0 = 満タン、0.0 = KO
+  // 体力バー領域のHSV色解析により、バーの充填率から算出
+  double health_ratio = 1;
+
+  // [将来] キャラクター位置 (YOLO + ONNX Runtime で検出予定)
+  // Position position = 2;
+}

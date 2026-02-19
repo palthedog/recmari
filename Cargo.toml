@@ -1,0 +1,7 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/recmari",
+    "crates/recmari-core",
+    "crates/recmari-proto",
+]
