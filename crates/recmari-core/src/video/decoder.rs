@@ -4,6 +4,7 @@ use std::process::{Child, Command, Stdio};
 
 use anyhow::{bail, Context, Result};
 use image::RgbImage;
+use tracing::{debug, error, info, warn};
 
 use super::frame::Frame;
 
@@ -15,6 +16,8 @@ struct ProbeResult {
 }
 
 fn probe(path: &Path) -> Result<ProbeResult> {
+    info!(?path, "probing video metadata with ffprobe");
+
     let output = Command::new("ffprobe")
         .args([
             "-v", "error",
@@ -30,6 +33,7 @@ fn probe(path: &Path) -> Result<ProbeResult> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
+        error!(%stderr, ?path, "ffprobe failed");
         bail!("ffprobe failed: {stderr}");
     }
 
@@ -37,6 +41,7 @@ fn probe(path: &Path) -> Result<ProbeResult> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parts: Vec<&str> = stdout.trim().split(',').collect();
     if parts.len() < 3 {
+        error!(%stdout, "unexpected ffprobe output format, expected width,height,fps");
         bail!("unexpected ffprobe output: {stdout}");
     }
 
@@ -51,6 +56,11 @@ fn probe(path: &Path) -> Result<ProbeResult> {
         parts[2].parse().context("failed to parse fps")?
     };
 
+    if fps <= 0.0 {
+        warn!(fps, ?path, "video has non-positive fps, timestamps will be 0.0");
+    }
+
+    info!(width, height, fps, "probe completed");
     Ok(ProbeResult { width, height, fps })
 }
 
@@ -67,12 +77,15 @@ pub struct VideoDecoder {
 impl VideoDecoder {
     /// Open a video file for decoding.
     pub fn open(path: &Path) -> Result<Self> {
+        assert!(path.exists(), "video file does not exist: {}", path.display());
+
         let info = probe(path)?;
+        assert!(info.width > 0 && info.height > 0, "invalid video dimensions: {}x{}", info.width, info.height);
+
+        info!(?path, "spawning ffmpeg decoder process");
 
         let child = Command::new("ffmpeg")
-            .args([
-                "-i",
-            ])
+            .args(["-i"])
             .arg(path)
             .args([
                 "-f", "rawvideo",
@@ -86,6 +99,14 @@ impl VideoDecoder {
             .context("failed to spawn ffmpeg — is ffmpeg installed?")?;
 
         let frame_bytes = (info.width as usize) * (info.height as usize) * 3;
+
+        info!(
+            width = info.width,
+            height = info.height,
+            fps = info.fps,
+            frame_bytes,
+            "video decoder opened"
+        );
 
         Ok(Self {
             child,
@@ -124,15 +145,25 @@ impl VideoDecoder {
             match stdout.read(&mut buf[read..]) {
                 Ok(0) => {
                     if read == 0 {
+                        info!(total_frames = self.frame_count, "video stream ended");
                         return Ok(None);
                     }
+                    error!(
+                        read_bytes = read,
+                        expected_bytes = self.frame_bytes,
+                        frame = self.frame_count,
+                        "ffmpeg stream ended mid-frame"
+                    );
                     bail!(
                         "ffmpeg stream ended mid-frame (read {read}/{} bytes)",
                         self.frame_bytes,
                     );
                 }
                 Ok(n) => read += n,
-                Err(e) => return Err(e).context("failed to read from ffmpeg pipe"),
+                Err(e) => {
+                    error!(frame = self.frame_count, %e, "failed to read from ffmpeg pipe");
+                    return Err(e).context("failed to read from ffmpeg pipe");
+                }
             }
         }
 
@@ -147,6 +178,8 @@ impl VideoDecoder {
         };
         self.frame_count += 1;
 
+        debug!(frame_number, timestamp_seconds, "decoded frame");
+
         Ok(Some(Frame {
             image,
             frame_number,
@@ -157,6 +190,7 @@ impl VideoDecoder {
 
 impl Drop for VideoDecoder {
     fn drop(&mut self) {
+        info!(total_frames = self.frame_count, "closing video decoder");
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
