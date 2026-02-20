@@ -150,7 +150,7 @@ fn count_matching_pixels(
         let offset = (t * width as f64) as i32;
         let x = scanline.x_start.saturating_add_signed(offset * dx);
         let pixel = image.get_pixel(x, scanline.y);
-        let hsv = rgb_to_hsv(pixel[0], pixel[1], pixel[2]);
+        let hsv = rgb_to_hsv(*pixel);
 
         if classifier(hsv) {
             count += 1;
@@ -211,8 +211,8 @@ fn is_damage(hsv: Hsv) -> bool {
     hsv.h >= 17.0 && hsv.h <= 25.0 && hsv.s >= 0.9 && hsv.v >= 0.9
 }
 
-fn rgb_to_hp_segment(r: u8, g: u8, b: u8) -> HpSegmentType {
-    let hsv = rgb_to_hsv(r, g, b);
+fn rgb_to_hp_segment(rgb: Rgb<u8>) -> HpSegmentType {
+    let hsv = rgb_to_hsv(rgb);
     if is_healthy(hsv) {
         HpSegmentType::Healthy
     } else if is_background(hsv) {

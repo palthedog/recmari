@@ -1,6 +1,6 @@
 use std::fmt::{self, Formatter};
 
-use image::RgbImage;
+use image::{Rgb, RgbImage};
 use tracing::{debug, info};
 
 /// Horizontal scanline defined by y coordinate and x range.
@@ -57,10 +57,10 @@ impl fmt::Display for Hsv {
     }
 }
 
-pub fn rgb_to_hsv(r: u8, g: u8, b: u8) -> Hsv {
-    let r = r as f32 / 255.0;
-    let g = g as f32 / 255.0;
-    let b = b as f32 / 255.0;
+pub fn rgb_to_hsv(rgb: Rgb<u8>) -> Hsv {
+    let r = rgb[0] as f32 / 255.0;
+    let g = rgb[1] as f32 / 255.0;
+    let b = rgb[2] as f32 / 255.0;
 
     let max = r.max(g).max(b);
     let min = r.min(g).min(b);
@@ -87,7 +87,7 @@ pub fn rgb_to_hsv(r: u8, g: u8, b: u8) -> Hsv {
 pub fn find_bar_boundary(
     image: &RgbImage,
     scanline: &Scanline,
-    classifier: impl Fn(u8, u8, u8) -> HpSegmentType,
+    classifier: impl Fn(Rgb<u8>) -> HpSegmentType,
 ) -> Option<f64> {
     assert!(scanline.x_end <= image.width(), "x_end exceeds image width");
     assert!(scanline.y < image.height(), "y exceeds image height");
@@ -106,11 +106,11 @@ pub fn find_bar_boundary(
         let x = scanline.x_start.saturating_add_signed(i as i32 * dx);
 
         let pixel_rgb = image.get_pixel(x, scanline.y);
-        let segment = classifier(pixel_rgb[0], pixel_rgb[1], pixel_rgb[2]);
+        let segment = classifier(*pixel_rgb);
 
         debug!(
             x,
-            hsv = format!("{}", rgb_to_hsv(pixel_rgb[0], pixel_rgb[1], pixel_rgb[2])),
+            hsv = format!("{}", rgb_to_hsv(*pixel_rgb)),
             segment = format!("{:?}", segment),
             "pixel sample"
         );
