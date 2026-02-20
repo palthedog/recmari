@@ -12,12 +12,7 @@ use recmari_proto::proto::FrameData;
 use crate::analysis::Hud;
 use crate::video::frame::Frame;
 
-const FONT_PATHS: &[&str] = &[
-    "C:\\Windows\\Fonts\\consola.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-    "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
-    "/System/Library/Fonts/Menlo.ttc",
-];
+const FONT_PATH: &str = "C:\\Windows\\Fonts\\consola.ttf";
 
 const TEXT_SCALE: f32 = 28.0;
 const TEXT_COLOR: Rgb<u8> = Rgb([255, 255, 255]);
@@ -76,15 +71,22 @@ impl DebugRenderer {
     }
 
     fn load_font() -> Option<FontVec> {
-        for path in FONT_PATHS {
-            if let Ok(data) = std::fs::read(path) {
-                if let Ok(font) = FontVec::try_from_vec(data) {
-                    info!(path, "loaded debug font");
-                    return Some(font);
-                }
+        let data = match std::fs::read(FONT_PATH) {
+            Ok(data) => data,
+            Err(e) => {
+                warn!(path = FONT_PATH, error = %e, "failed to read font file");
+                return None;
+            }
+        };
+        match FontVec::try_from_vec(data) {
+            Ok(font) => {
+                info!(path = FONT_PATH, "loaded debug font");
+                Some(font)
+            }
+            Err(e) => {
+                warn!(path = FONT_PATH, error = %e, "failed to parse font file");
+                None
             }
         }
-        warn!("no system font found for debug text overlay");
-        None
     }
 }
