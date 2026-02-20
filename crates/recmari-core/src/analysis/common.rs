@@ -31,6 +31,16 @@ impl Scanline {
             y: self.y * frame_h / ref_h,
         }
     }
+
+    /// Scan direction: +1 for left-to-right, -1 for right-to-left.
+    pub fn dx(&self) -> i32 {
+        if self.x_end > self.x_start { 1 } else { -1 }
+    }
+
+    /// Pixel width of the scanline.
+    pub fn width(&self) -> u32 {
+        self.x_start.abs_diff(self.x_end)
+    }
 }
 
 /// HSV representation. H in [0, 360), S and V in [0.0, 1.0].
@@ -82,16 +92,9 @@ pub fn find_bar_boundary(
     assert!(scanline.x_end <= image.width(), "x_end exceeds image width");
     assert!(scanline.y < image.height(), "y exceeds image height");
 
-    let dx: i32 = if scanline.x_end > scanline.x_start {
-        1
-    } else {
-        -1
-    };
-
+    let dx = scanline.dx();
+    let width = scanline.width();
     let mut prev_segment = HpSegmentType::Healthy;
-
-    // Find the rightmost matching pixel by scanning from x_end inward.
-    let width = scanline.x_start.abs_diff(scanline.x_end);
     debug!(
         x_start = scanline.x_start,
         x_end = scanline.x_end,

@@ -2,7 +2,7 @@ use std::path::Path;
 
 use ab_glyph::{FontVec, PxScale};
 use anyhow::{Context, Result};
-use image::Rgb;
+use image::{Rgb, RgbImage};
 use imageproc::drawing::{draw_hollow_rect_mut, draw_text_mut};
 use imageproc::rect::Rect;
 use tracing::{debug, info, warn};
@@ -33,7 +33,7 @@ impl DebugRenderer {
         &self,
         frame: &Frame,
         hud: &dyn Hud,
-        data: &FrameData,
+        data: Option<&FrameData>,
         dir: &Path,
     ) -> Result<()> {
         let mut img = frame.image.clone();
@@ -44,30 +44,48 @@ impl DebugRenderer {
             draw_hollow_rect_mut(&mut img, rect, region.color);
         }
 
-        if let Some(font) = &self.font {
-            let scale = PxScale::from(TEXT_SCALE);
-            let x = 10;
-            let mut y = 10;
+        self.draw_text_overlay(&mut img, frame, hud, data);
 
-            let header = format!("F:{}", data.frame_number);
-            draw_text_mut(&mut img, TEXT_COLOR, x, y, scale, font, &header);
-            y += TEXT_LINE_HEIGHT;
-
-            let p1_hp = data.player1.as_ref().unwrap().health_ratio;
-            let p2_hp = data.player2.as_ref().unwrap().health_ratio;
-            let p1_text = format!("P1 HP:{:.0}%", p1_hp * 100.0);
-            let p2_text = format!("P2 HP:{:.0}%", p2_hp * 100.0);
-            draw_text_mut(&mut img, TEXT_COLOR, x, y, scale, font, &p1_text);
-            y += TEXT_LINE_HEIGHT;
-            draw_text_mut(&mut img, TEXT_COLOR, x, y, scale, font, &p2_text);
-        }
-
-        let path = dir.join(format!("frame_{:08}.png", data.frame_number));
+        let path = dir.join(format!("frame_{:08}.png", frame.frame_number));
         img.save(&path)
             .with_context(|| format!("failed to save debug frame to {}", path.display()))?;
 
         debug!(?path, "saved debug frame");
         Ok(())
+    }
+
+    fn draw_text_overlay(
+        &self,
+        img: &mut RgbImage,
+        frame: &Frame,
+        hud: &dyn Hud,
+        data: Option<&FrameData>,
+    ) {
+        let Some(font) = &self.font else { return };
+        let scale = PxScale::from(TEXT_SCALE);
+        let x = 10;
+        let mut y = 10;
+
+        let header = format!("F:{}", frame.frame_number);
+        draw_text_mut(img, TEXT_COLOR, x, y, scale, font, &header);
+        y += TEXT_LINE_HEIGHT;
+
+        let Some(fd) = data else {
+            draw_text_mut(img, TEXT_COLOR, x, y, scale, font, "HUD:none");
+            return;
+        };
+
+        let hud_text = format!("HUD:{}", hud.hud_type());
+        draw_text_mut(img, TEXT_COLOR, x, y, scale, font, &hud_text);
+        y += TEXT_LINE_HEIGHT;
+
+        let p1_hp = fd.player1.as_ref().unwrap().health_ratio;
+        let p2_hp = fd.player2.as_ref().unwrap().health_ratio;
+        let p1_text = format!("P1 HP:{:.0}%", p1_hp * 100.0);
+        let p2_text = format!("P2 HP:{:.0}%", p2_hp * 100.0);
+        draw_text_mut(img, TEXT_COLOR, x, y, scale, font, &p1_text);
+        y += TEXT_LINE_HEIGHT;
+        draw_text_mut(img, TEXT_COLOR, x, y, scale, font, &p2_text);
     }
 
     fn load_font() -> Option<FontVec> {

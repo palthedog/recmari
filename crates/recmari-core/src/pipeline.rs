@@ -11,6 +11,7 @@ use crate::analysis::huds::manemon::ManemonHud;
 use crate::analysis::Hud;
 use crate::debug::DebugRenderer;
 use crate::video::decoder::VideoDecoder;
+use crate::video::frame::Frame;
 
 /// Both players' health must be at or above this to count as "full".
 const ROUND_RESET_THRESHOLD: f64 = 0.95;
@@ -62,7 +63,6 @@ pub fn run_pipeline(input: &Path, config: &PipelineConfig) -> Result<Vec<Match>>
 
     let mut decoder =
         VideoDecoder::open_at_frame(input, config.start_frame).context("failed to open video")?;
-    let hud = ManemonHud::new(decoder.width(), decoder.height());
 
     let debug_renderer = config.debug_frames_dir.as_ref().map(|dir| {
         std::fs::create_dir_all(dir).expect("failed to create debug frames directory");
@@ -70,7 +70,7 @@ pub fn run_pipeline(input: &Path, config: &PipelineConfig) -> Result<Vec<Match>>
         DebugRenderer::new()
     });
 
-    let frame_data = collect_frame_data(&mut decoder, &hud, config, &debug_renderer)?;
+    let frame_data = collect_frame_data(&mut decoder, config, &debug_renderer)?;
     info!(
         total_sampled_frames = frame_data.len(),
         "frame collection complete"
@@ -84,71 +84,94 @@ pub fn run_pipeline(input: &Path, config: &PipelineConfig) -> Result<Vec<Match>>
 
 fn collect_frame_data(
     decoder: &mut VideoDecoder,
-    hud: &dyn Hud,
     config: &PipelineConfig,
     debug_renderer: &Option<DebugRenderer>,
 ) -> Result<Vec<FrameData>> {
+    let hud = ManemonHud::new(decoder.width(), decoder.height());
     let mut results: Vec<FrameData> = Vec::new();
     let mut last_p1: Option<f64> = None;
     let mut last_p2: Option<f64> = None;
+    let mut frames_examined = 0u32;
 
     loop {
-        if let Some(max) = config.max_frames {
-            if results.len() >= max as usize {
-                break;
-            }
-        }
-
         let Some(frame) = decoder.next_frame()? else {
             break;
         };
 
-        // When max_frames is set, process every decoded frame without sampling.
         if config.max_frames.is_none() && frame.frame_number % config.sample_rate != 0 {
             continue;
         }
 
-        info!(frame_number = frame.frame_number, "processing frame");
+        let detected = hud.detect_hud(&frame);
+        info!(
+            frame_number = frame.frame_number,
+            hud_detected = detected,
+            "processing frame"
+        );
 
-        let hp = hud.analyze_hp(&frame);
-
-        let p1 = hp.p1.or(last_p1);
-        let p2 = hp.p2.or(last_p2);
-
-        let (Some(p1), Some(p2)) = (p1, p2) else {
-            warn!(
-                frame_number = frame.frame_number,
-                p1_available = p1.is_some(),
-                p2_available = p2.is_some(),
-                "no HP data available yet, skipping"
-            );
-            continue;
-        };
-
-        if hp.p1.is_some() {
-            last_p1 = Some(p1);
-        }
-        if hp.p2.is_some() {
-            last_p2 = Some(p2);
-        }
-
-        let fd = FrameData {
-            frame_number: frame.frame_number,
-            timestamp_seconds: frame.timestamp_seconds,
-            player1: Some(PlayerState { health_ratio: p1 }),
-            player2: Some(PlayerState { health_ratio: p2 }),
+        let fd = if detected {
+            analyze_frame(&hud, &frame, &mut last_p1, &mut last_p2)
+        } else {
+            last_p1 = None;
+            last_p2 = None;
+            None
         };
 
         if let (Some(renderer), Some(dir)) = (debug_renderer, &config.debug_frames_dir) {
             renderer
-                .save_frame(&frame, hud, &fd, dir)
+                .save_frame(&frame, &hud, fd.as_ref(), dir)
                 .context("failed to save debug frame")?;
         }
 
-        results.push(fd);
+        if let Some(fd) = fd {
+            results.push(fd);
+        }
+
+        frames_examined += 1;
+        if let Some(max) = config.max_frames {
+            if frames_examined >= max {
+                break;
+            }
+        }
     }
 
     Ok(results)
+}
+
+/// Read HP from a detected HUD frame, applying gap-fill from previous readings.
+fn analyze_frame(
+    hud: &dyn Hud,
+    frame: &Frame,
+    last_p1: &mut Option<f64>,
+    last_p2: &mut Option<f64>,
+) -> Option<FrameData> {
+    let hp = hud.analyze_hp(frame);
+    let p1 = hp.p1.or(*last_p1);
+    let p2 = hp.p2.or(*last_p2);
+
+    let (Some(p1), Some(p2)) = (p1, p2) else {
+        warn!(
+            frame_number = frame.frame_number,
+            p1_available = p1.is_some(),
+            p2_available = p2.is_some(),
+            "no HP data available yet, skipping"
+        );
+        return None;
+    };
+
+    if hp.p1.is_some() {
+        *last_p1 = Some(p1);
+    }
+    if hp.p2.is_some() {
+        *last_p2 = Some(p2);
+    }
+
+    Some(FrameData {
+        frame_number: frame.frame_number,
+        timestamp_seconds: frame.timestamp_seconds,
+        player1: Some(PlayerState { health_ratio: p1 }),
+        player2: Some(PlayerState { health_ratio: p2 }),
+    })
 }
 
 fn segment_into_match(frames: &[FrameData], input: &Path) -> Match {
