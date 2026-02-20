@@ -1,12 +1,14 @@
 mod cli;
 
-use std::fs;
+use std::path::Path;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use tracing::info;
+use prost::Message;
+use tracing::{info, warn};
 
-use recmari_core::video::decoder::VideoDecoder;
+use recmari_core::pipeline::{self, PipelineConfig};
+use recmari_proto::proto::Match;
 
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -24,38 +26,56 @@ fn main() -> Result<()> {
             output,
             sample_rate,
             debug_frames,
+            frame,
         } => {
-            info!(?input, ?output, sample_rate, "starting analysis");
+            info!(?input, ?output, sample_rate, ?frame, "starting analysis");
 
-            let mut decoder =
-                VideoDecoder::open(&input).context("failed to open video")?;
+            let config = PipelineConfig {
+                sample_rate,
+                start_frame: frame.unwrap_or(0),
+                max_frames: frame.map(|_| 1),
+                debug_frames_dir: debug_frames,
+            };
 
-            info!(
-                width = decoder.width(),
-                height = decoder.height(),
-                fps = decoder.fps(),
-                "video opened"
-            );
+            let matches =
+                pipeline::run_pipeline(&input, &config).context("pipeline failed")?;
 
-            // Phase 1: decode first frame and save as PNG for verification.
-            if let Some(frame) = decoder.next_frame()? {
-                let debug_dir = debug_frames.unwrap_or_else(|| output.with_extension("debug"));
-                fs::create_dir_all(&debug_dir)
-                    .context("failed to create debug frames directory")?;
-
-                let png_path = debug_dir.join("frame_0000.png");
-                frame
-                    .image
-                    .save(&png_path)
-                    .context("failed to save debug frame")?;
-
-                info!(?png_path, "saved first frame as PNG");
+            if matches.is_empty() {
+                warn!("no matches detected in video");
             }
 
-            // TODO: full pipeline (Phase 2)
-            let _ = sample_rate;
+            write_matches(&matches, &output)?;
+
+            info!(
+                match_count = matches.len(),
+                total_rounds = matches.iter().map(|m| m.rounds.len()).sum::<usize>(),
+                ?output,
+                "analysis complete"
+            );
 
             Ok(())
         }
     }
+}
+
+/// Serialize matches as length-delimited protobuf and write to file.
+fn write_matches(matches: &[Match], output: &Path) -> Result<()> {
+    info!(?output, match_count = matches.len(), "writing protobuf output");
+
+    let mut buf = Vec::new();
+    for m in matches {
+        m.encode_length_delimited(&mut buf)
+            .context("failed to encode Match")?;
+    }
+
+    if let Some(parent) = output.parent() {
+        std::fs::create_dir_all(parent)
+            .context("failed to create output directory")?;
+    }
+
+    std::fs::write(output, &buf)
+        .with_context(|| format!("failed to write {}", output.display()))?;
+
+    info!(?output, bytes = buf.len(), "protobuf output written");
+    Ok(())
 }

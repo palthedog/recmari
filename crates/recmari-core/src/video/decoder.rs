@@ -75,16 +75,31 @@ pub struct VideoDecoder {
 }
 
 impl VideoDecoder {
-    /// Open a video file for decoding.
+    /// Open a video file for decoding from the beginning.
     pub fn open(path: &Path) -> Result<Self> {
+        Self::open_at_frame(path, 0)
+    }
+
+    /// Open a video file and seek to a specific frame before decoding.
+    pub fn open_at_frame(path: &Path, start_frame: u32) -> Result<Self> {
         assert!(path.exists(), "video file does not exist: {}", path.display());
 
         let info = probe(path)?;
         assert!(info.width > 0 && info.height > 0, "invalid video dimensions: {}x{}", info.width, info.height);
 
-        info!(?path, "spawning ffmpeg decoder process");
+        let seek_seconds = if start_frame > 0 && info.fps > 0.0 {
+            start_frame as f64 / info.fps
+        } else {
+            0.0
+        };
 
-        let child = Command::new("ffmpeg")
+        info!(?path, start_frame, seek_seconds, "spawning ffmpeg decoder process");
+
+        let mut cmd = Command::new("ffmpeg");
+        if seek_seconds > 0.0 {
+            cmd.args(["-ss", &format!("{seek_seconds:.3}")]);
+        }
+        let child = cmd
             .args(["-i"])
             .arg(path)
             .args([
@@ -105,6 +120,7 @@ impl VideoDecoder {
             height = info.height,
             fps = info.fps,
             frame_bytes,
+            start_frame,
             "video decoder opened"
         );
 
@@ -113,7 +129,7 @@ impl VideoDecoder {
             width: info.width,
             height: info.height,
             fps: info.fps,
-            frame_count: 0,
+            frame_count: start_frame,
             frame_bytes,
         })
     }

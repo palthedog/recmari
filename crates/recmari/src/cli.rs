@@ -21,12 +21,16 @@ pub enum Command {
         #[arg(short, long)]
         output: PathBuf,
 
-        /// Analyze every Nth frame (default: 2, i.e. 30 samples/sec from 60fps).
-        #[arg(short, long, default_value_t = 2)]
+        /// Analyze every Nth frame (default: 60, i.e. 60 samples/sec from 60fps).
+        #[arg(short, long, default_value_t = 60)]
         sample_rate: u32,
 
         /// Directory to save debug frames with HUD region overlays.
         #[arg(long)]
         debug_frames: Option<PathBuf>,
+
+        /// Analyze only this single frame (seek + analyze + debug overlay).
+        #[arg(long)]
+        frame: Option<u32>,
     },
 }

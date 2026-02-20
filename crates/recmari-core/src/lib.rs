@@ -1,4 +1,5 @@
-pub mod video;
 pub mod analysis;
-pub mod config;
+pub mod debug;
 pub mod pipeline;
+pub mod rect;
+pub mod video;
