@@ -29,6 +29,14 @@ pub struct HpReading {
     pub p2: Option<f64>,
 }
 
+/// SA gauge reading for a single frame. Each player's value is None if unreadable.
+/// The value is stock count (integer part) + bar fill ratio (fractional part), ranging 0.0 to 3.0.
+#[derive(Debug, Clone, Copy)]
+pub struct SaReading {
+    pub p1: Option<f64>,
+    pub p2: Option<f64>,
+}
+
 /// A region to draw on debug frames.
 pub struct DebugRegion {
     pub rect: PixelRect,
@@ -45,6 +53,9 @@ pub trait Hud {
 
     /// Read HP ratios from a single frame.
     fn analyze_hp(&self, frame: &Frame) -> HpReading;
+
+    /// Read SA gauge level (0.0-3.0) from a single frame.
+    fn analyze_sa(&self, frame: &Frame) -> SaReading;
 
     /// Return the regions to draw on debug frames.
     fn debug_regions(&self) -> Vec<DebugRegion>;

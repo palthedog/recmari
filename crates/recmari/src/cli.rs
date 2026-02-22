@@ -33,4 +33,12 @@ pub enum Command {
         #[arg(long)]
         frame: Option<u32>,
     },
+
+    /// Scan SA digit bounding box for unique probe positions.
+    ProbeScan {
+        /// Image:digit pairs (e.g. "path/to/both_sa0.png:0").
+        /// Each image must show the specified digit for both P1 and P2.
+        #[arg(long, required = true)]
+        image: Vec<String>,
+    },
 }

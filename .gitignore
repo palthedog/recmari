@@ -1,5 +1,6 @@
 # Video files which should not be shared publicly
 /videos/
+*.pb
 
 # Claude Code local settings
 **/.claude/*.local.*

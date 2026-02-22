@@ -91,6 +91,8 @@ fn collect_frame_data(
     let mut results: Vec<FrameData> = Vec::new();
     let mut last_p1: Option<f64> = None;
     let mut last_p2: Option<f64> = None;
+    let mut last_p1_sa: Option<f64> = None;
+    let mut last_p2_sa: Option<f64> = None;
     let mut frames_examined = 0u32;
 
     loop {
@@ -110,10 +112,19 @@ fn collect_frame_data(
         );
 
         let fd = if detected {
-            analyze_frame(&hud, &frame, &mut last_p1, &mut last_p2)
+            analyze_frame(
+                &hud,
+                &frame,
+                &mut last_p1,
+                &mut last_p2,
+                &mut last_p1_sa,
+                &mut last_p2_sa,
+            )
         } else {
             last_p1 = None;
             last_p2 = None;
+            last_p1_sa = None;
+            last_p2_sa = None;
             None
         };
 
@@ -138,12 +149,14 @@ fn collect_frame_data(
     Ok(results)
 }
 
-/// Read HP from a detected HUD frame, applying gap-fill from previous readings.
+/// Read HP and SA from a detected HUD frame, applying gap-fill from previous readings.
 fn analyze_frame(
     hud: &dyn Hud,
     frame: &Frame,
     last_p1: &mut Option<f64>,
     last_p2: &mut Option<f64>,
+    last_p1_sa: &mut Option<f64>,
+    last_p2_sa: &mut Option<f64>,
 ) -> Option<FrameData> {
     let hp = hud.analyze_hp(frame);
     let p1 = hp.p1.or(*last_p1);
@@ -166,11 +179,28 @@ fn analyze_frame(
         *last_p2 = Some(p2);
     }
 
+    let sa = hud.analyze_sa(frame);
+    let p1_sa = sa.p1.or(*last_p1_sa);
+    let p2_sa = sa.p2.or(*last_p2_sa);
+
+    if sa.p1.is_some() {
+        *last_p1_sa = p1_sa;
+    }
+    if sa.p2.is_some() {
+        *last_p2_sa = p2_sa;
+    }
+
     Some(FrameData {
         frame_number: frame.frame_number,
         timestamp_seconds: frame.timestamp_seconds,
-        player1: Some(PlayerState { health_ratio: p1 }),
-        player2: Some(PlayerState { health_ratio: p2 }),
+        player1: Some(PlayerState {
+            health_ratio: p1,
+            sa_gauge: p1_sa,
+        }),
+        player2: Some(PlayerState {
+            health_ratio: p2,
+            sa_gauge: p2_sa,
+        }),
     })
 }
 
@@ -252,8 +282,14 @@ mod tests {
         FrameData {
             frame_number,
             timestamp_seconds: ts,
-            player1: Some(PlayerState { health_ratio: p1 }),
-            player2: Some(PlayerState { health_ratio: p2 }),
+            player1: Some(PlayerState {
+                health_ratio: p1,
+                sa_gauge: None,
+            }),
+            player2: Some(PlayerState {
+                health_ratio: p2,
+                sa_gauge: None,
+            }),
         }
     }
 

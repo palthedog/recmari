@@ -79,13 +79,27 @@ impl DebugRenderer {
         draw_text_mut(img, TEXT_COLOR, x, y, scale, font, &hud_text);
         y += TEXT_LINE_HEIGHT;
 
-        let p1_hp = fd.player1.as_ref().unwrap().health_ratio;
-        let p2_hp = fd.player2.as_ref().unwrap().health_ratio;
-        let p1_text = format!("P1 HP:{:.0}%", p1_hp * 100.0);
-        let p2_text = format!("P2 HP:{:.0}%", p2_hp * 100.0);
+        let p1 = fd.player1.as_ref().unwrap();
+        let p2 = fd.player2.as_ref().unwrap();
+
+        let p1_text = format!("P1 HP:{:.0}%", p1.health_ratio * 100.0);
         draw_text_mut(img, TEXT_COLOR, x, y, scale, font, &p1_text);
         y += TEXT_LINE_HEIGHT;
+
+        if let Some(sa) = p1.sa_gauge {
+            let sa_text = format!("P1 SA:{:.2}", truncate_decimal(sa, 2));
+            draw_text_mut(img, TEXT_COLOR, x, y, scale, font, &sa_text);
+            y += TEXT_LINE_HEIGHT;
+        }
+
+        let p2_text = format!("P2 HP:{:.0}%", p2.health_ratio * 100.0);
         draw_text_mut(img, TEXT_COLOR, x, y, scale, font, &p2_text);
+        y += TEXT_LINE_HEIGHT;
+
+        if let Some(sa) = p2.sa_gauge {
+            let sa_text = format!("P2 SA:{:.2}", truncate_decimal(sa, 2));
+            draw_text_mut(img, TEXT_COLOR, x, y, scale, font, &sa_text);
+        }
     }
 
     fn load_font() -> Option<FontVec> {
@@ -107,4 +121,10 @@ impl DebugRenderer {
             }
         }
     }
+}
+
+/// Truncate a float to the given number of decimal places (floor toward zero).
+fn truncate_decimal(value: f64, decimals: u32) -> f64 {
+    let factor = 10f64.powi(decimals as i32);
+    (value * factor).floor() / factor
 }

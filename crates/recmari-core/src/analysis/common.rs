@@ -12,14 +12,45 @@ pub struct Scanline {
     pub y: u32,
 }
 
+/// Pixel classification for bar-fill boundary detection.
+/// Used by both HP and SA gauge scanning.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HpSegmentType {
-    // the HP bar can be hidden by certain effects. In that case, we should simply ignore it.
+pub enum BarSegment {
+    /// Bar region is obscured by effects — reading should be skipped.
     Unknown,
-    Healthy,
-    Damage,            // e.g. orange
-    ProvisionalDamage, // e.g. white
+    /// Active bar fill (e.g. yellow HP, cyan SA, purple CA).
+    Foreground,
+    /// Depleted region or non-bar area (e.g. blue background, orange damage).
     Background,
+}
+
+/// Detailed HP bar pixel classification.
+/// Preserves per-color semantics beyond the Foreground/Background split.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HpSegment {
+    Unknown,
+    /// Yellow HP fill (the remaining health).
+    Healthy,
+    /// White/bright border at the edge of the HP bar.
+    Border,
+    /// Red/orange damage flash.
+    Damage,
+    /// Gray provisional damage (white-life).
+    ProvisionalDamage,
+    /// Dark blue depleted region.
+    Background,
+}
+
+impl From<HpSegment> for BarSegment {
+    fn from(seg: HpSegment) -> Self {
+        match seg {
+            HpSegment::Healthy | HpSegment::Border => BarSegment::Foreground,
+            HpSegment::Damage | HpSegment::ProvisionalDamage | HpSegment::Background => {
+                BarSegment::Background
+            }
+            HpSegment::Unknown => BarSegment::Unknown,
+        }
+    }
 }
 
 impl Scanline {
@@ -87,20 +118,21 @@ pub fn rgb_to_hsv(rgb: Rgb<u8>) -> Hsv {
 pub fn find_bar_boundary(
     image: &RgbImage,
     scanline: &Scanline,
-    classifier: impl Fn(Rgb<u8>) -> HpSegmentType,
+    classifier: impl Fn(Rgb<u8>) -> BarSegment,
 ) -> Option<f64> {
     assert!(scanline.x_end <= image.width(), "x_end exceeds image width");
     assert!(scanline.y < image.height(), "y exceeds image height");
 
     let dx = scanline.dx();
     let width = scanline.width();
-    let mut prev_segment = HpSegmentType::Healthy;
+    let mut prev_segment = BarSegment::Foreground;
+    let mut last_fg_i: Option<u32> = None;
     debug!(
         x_start = scanline.x_start,
         x_end = scanline.x_end,
         y = scanline.y,
         width,
-        "scanning HP bar boundary"
+        "scanning bar boundary"
     );
     for i in 0..=width {
         let x = scanline.x_start.saturating_add_signed(i as i32 * dx);
@@ -116,18 +148,21 @@ pub fn find_bar_boundary(
         );
 
         match segment {
-            HpSegmentType::Unknown | HpSegmentType::Healthy => {
-                continue;
+            BarSegment::Foreground => {
+                last_fg_i = Some(i);
             }
-            HpSegmentType::Background
-            | HpSegmentType::Damage
-            | HpSegmentType::ProvisionalDamage => {
-                if prev_segment == HpSegmentType::Healthy {
+            BarSegment::Unknown => {}
+            BarSegment::Background => {
+                if prev_segment == BarSegment::Foreground {
                     let boundary = (i as f64) / width as f64;
                     return Some(boundary);
-                } else if prev_segment == HpSegmentType::Unknown {
+                } else if prev_segment == BarSegment::Unknown {
+                    if let Some(fg_i) = last_fg_i {
+                        let boundary = (fg_i as f64 + 1.0) / width as f64;
+                        return Some(boundary);
+                    }
                     info!(
-                        "border pixel between Healthy and Background is hidden by Unknown object.",
+                        "border between foreground and background is hidden by unknown object",
                     );
                     return None;
                 }
@@ -135,6 +170,12 @@ pub fn find_bar_boundary(
         }
 
         prev_segment = segment;
+    }
+
+    if prev_segment == BarSegment::Unknown {
+        if let Some(fg_i) = last_fg_i {
+            return Some((fg_i as f64 + 1.0) / width as f64);
+        }
     }
 
     Some(1.0)
