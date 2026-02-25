@@ -8,7 +8,7 @@ use recmari_proto::proto::{
 };
 
 use crate::analysis::huds::manemon::ManemonHud;
-use crate::analysis::Hud;
+use crate::analysis::{Hud, OdValue};
 use crate::debug::DebugRenderer;
 use crate::video::decoder::VideoDecoder;
 use crate::video::frame::Frame;
@@ -37,6 +37,23 @@ impl Default for PipelineConfig {
             max_frames: None,
             debug_frames_dir: None,
         }
+    }
+}
+
+/// Carries forward last-known gauge values across frames when a reading is temporarily unavailable.
+#[derive(Default)]
+struct GapFillState {
+    p1_hp: Option<f64>,
+    p2_hp: Option<f64>,
+    p1_sa: Option<f64>,
+    p2_sa: Option<f64>,
+    p1_od: Option<OdValue>,
+    p2_od: Option<OdValue>,
+}
+
+impl GapFillState {
+    fn clear(&mut self) {
+        *self = Self::default();
     }
 }
 
@@ -89,10 +106,7 @@ fn collect_frame_data(
 ) -> Result<Vec<FrameData>> {
     let hud = ManemonHud::new(decoder.width(), decoder.height());
     let mut results: Vec<FrameData> = Vec::new();
-    let mut last_p1: Option<f64> = None;
-    let mut last_p2: Option<f64> = None;
-    let mut last_p1_sa: Option<f64> = None;
-    let mut last_p2_sa: Option<f64> = None;
+    let mut gap = GapFillState::default();
     let mut frames_examined = 0u32;
 
     loop {
@@ -112,19 +126,9 @@ fn collect_frame_data(
         );
 
         let fd = if detected {
-            analyze_frame(
-                &hud,
-                &frame,
-                &mut last_p1,
-                &mut last_p2,
-                &mut last_p1_sa,
-                &mut last_p2_sa,
-            )
+            analyze_frame(&hud, &frame, &mut gap)
         } else {
-            last_p1 = None;
-            last_p2 = None;
-            last_p1_sa = None;
-            last_p2_sa = None;
+            gap.clear();
             None
         };
 
@@ -149,18 +153,15 @@ fn collect_frame_data(
     Ok(results)
 }
 
-/// Read HP and SA from a detected HUD frame, applying gap-fill from previous readings.
+/// Read HP, SA, and OD from a detected HUD frame, applying gap-fill from previous readings.
 fn analyze_frame(
     hud: &dyn Hud,
     frame: &Frame,
-    last_p1: &mut Option<f64>,
-    last_p2: &mut Option<f64>,
-    last_p1_sa: &mut Option<f64>,
-    last_p2_sa: &mut Option<f64>,
+    gap: &mut GapFillState,
 ) -> Option<FrameData> {
     let hp = hud.analyze_hp(frame);
-    let p1 = hp.p1.or(*last_p1);
-    let p2 = hp.p2.or(*last_p2);
+    let p1 = hp.p1.or(gap.p1_hp);
+    let p2 = hp.p2.or(gap.p2_hp);
 
     let (Some(p1), Some(p2)) = (p1, p2) else {
         warn!(
@@ -173,35 +174,54 @@ fn analyze_frame(
     };
 
     if hp.p1.is_some() {
-        *last_p1 = Some(p1);
+        gap.p1_hp = Some(p1);
     }
     if hp.p2.is_some() {
-        *last_p2 = Some(p2);
+        gap.p2_hp = Some(p2);
     }
 
     let sa = hud.analyze_sa(frame);
-    let p1_sa = sa.p1.or(*last_p1_sa);
-    let p2_sa = sa.p2.or(*last_p2_sa);
+    let p1_sa = sa.p1.or(gap.p1_sa);
+    let p2_sa = sa.p2.or(gap.p2_sa);
 
     if sa.p1.is_some() {
-        *last_p1_sa = p1_sa;
+        gap.p1_sa = p1_sa;
     }
     if sa.p2.is_some() {
-        *last_p2_sa = p2_sa;
+        gap.p2_sa = p2_sa;
+    }
+
+    let od = hud.analyze_od(frame);
+    let p1_od = od.p1.or(gap.p1_od);
+    let p2_od = od.p2.or(gap.p2_od);
+
+    if od.p1.is_some() {
+        gap.p1_od = p1_od;
+    }
+    if od.p2.is_some() {
+        gap.p2_od = p2_od;
     }
 
     Some(FrameData {
         frame_number: frame.frame_number,
         timestamp_seconds: frame.timestamp_seconds,
-        player1: Some(PlayerState {
-            health_ratio: p1,
-            sa_gauge: p1_sa,
-        }),
-        player2: Some(PlayerState {
-            health_ratio: p2,
-            sa_gauge: p2_sa,
-        }),
+        player1: Some(od_to_player_state(p1, p1_sa, p1_od)),
+        player2: Some(od_to_player_state(p2, p2_sa, p2_od)),
     })
+}
+
+fn od_to_player_state(hp: f64, sa: Option<f64>, od: Option<OdValue>) -> PlayerState {
+    let (od_gauge, burnout_gauge) = match od {
+        Some(OdValue::Normal(v)) => (Some(v), None),
+        Some(OdValue::Burnout(v)) => (None, Some(v)),
+        None => (None, None),
+    };
+    PlayerState {
+        health_ratio: hp,
+        sa_gauge: sa,
+        od_gauge,
+        burnout_gauge,
+    }
 }
 
 fn segment_into_match(frames: &[FrameData], input: &Path) -> Match {
@@ -285,10 +305,14 @@ mod tests {
             player1: Some(PlayerState {
                 health_ratio: p1,
                 sa_gauge: None,
+                od_gauge: None,
+                burnout_gauge: None,
             }),
             player2: Some(PlayerState {
                 health_ratio: p2,
                 sa_gauge: None,
+                od_gauge: None,
+                burnout_gauge: None,
             }),
         }
     }

@@ -92,6 +92,10 @@ impl DebugRenderer {
             y += TEXT_LINE_HEIGHT;
         }
 
+        let p1_od_text = format_od_text("P1", p1.od_gauge, p1.burnout_gauge);
+        draw_text_mut(img, TEXT_COLOR, x, y, scale, font, &p1_od_text);
+        y += TEXT_LINE_HEIGHT;
+
         let p2_text = format!("P2 HP:{:.0}%", p2.health_ratio * 100.0);
         draw_text_mut(img, TEXT_COLOR, x, y, scale, font, &p2_text);
         y += TEXT_LINE_HEIGHT;
@@ -99,7 +103,11 @@ impl DebugRenderer {
         if let Some(sa) = p2.sa_gauge {
             let sa_text = format!("P2 SA:{:.2}", truncate_decimal(sa, 2));
             draw_text_mut(img, TEXT_COLOR, x, y, scale, font, &sa_text);
+            y += TEXT_LINE_HEIGHT;
         }
+
+        let p2_od_text = format_od_text("P2", p2.od_gauge, p2.burnout_gauge);
+        draw_text_mut(img, TEXT_COLOR, x, y, scale, font, &p2_od_text);
     }
 
     fn load_font() -> Option<FontVec> {
@@ -120,6 +128,17 @@ impl DebugRenderer {
                 None
             }
         }
+    }
+}
+
+/// Format OD gauge text: shows burnout if active, otherwise normal OD value.
+fn format_od_text(player: &str, od_gauge: Option<f64>, burnout_gauge: Option<f64>) -> String {
+    if let Some(bo) = burnout_gauge {
+        format!("{} BO:{:.2}", player, truncate_decimal(bo, 2))
+    } else if let Some(od) = od_gauge {
+        format!("{} OD:{:.2}", player, truncate_decimal(od, 2))
+    } else {
+        format!("{} OD:--", player)
     }
 }
 

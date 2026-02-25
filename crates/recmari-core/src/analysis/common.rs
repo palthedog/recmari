@@ -4,7 +4,16 @@ use image::{Rgb, RgbImage};
 use tracing::{debug, info};
 
 /// Horizontal scanline defined by y coordinate and x range.
-/// Both start and end are inclusive, and can be in either order (e.g. right-to-left).
+///
+/// `x_start` and `x_end` are distances from the left edge of the image,
+/// not pixel indices. Pixels are the cells between distance marks:
+///
+/// ```text
+/// start=10, end=14  → pixels 10, 11, 12, 13  (forward)
+/// start=14, end=10  → pixels 13, 12, 11, 10  (backward)
+/// ```
+///
+/// Pixel count = |start − end| = `width()`.
 #[derive(Debug, Clone, Copy)]
 pub struct Scanline {
     pub x_start: u32,
@@ -65,12 +74,33 @@ impl Scanline {
 
     /// Scan direction: +1 for left-to-right, -1 for right-to-left.
     pub fn dx(&self) -> i32 {
-        if self.x_end > self.x_start { 1 } else { -1 }
+        if self.x_end > self.x_start {
+            1
+        } else {
+            -1
+        }
     }
 
-    /// Pixel width of the scanline.
+    /// Number of pixels in the scanline.
     pub fn width(&self) -> u32 {
         self.x_start.abs_diff(self.x_end)
+    }
+
+    pub fn first_pos(&self) -> (u32, u32) {
+        (self.x_at(0), self.y)
+    }
+
+    pub fn last_pos(&self) -> (u32, u32) {
+        (self.x_at(self.width() - 1), self.y)
+    }
+
+    /// Pixel x-coordinate at the given offset along the scanline.
+    pub fn x_at(&self, i: u32) -> u32 {
+        if self.x_end > self.x_start {
+            self.x_start + i
+        } else {
+            self.x_start - 1 - i
+        }
     }
 }
 
@@ -120,10 +150,8 @@ pub fn find_bar_boundary(
     scanline: &Scanline,
     classifier: impl Fn(Rgb<u8>) -> BarSegment,
 ) -> Option<f64> {
-    assert!(scanline.x_end <= image.width(), "x_end exceeds image width");
     assert!(scanline.y < image.height(), "y exceeds image height");
 
-    let dx = scanline.dx();
     let width = scanline.width();
     let mut prev_segment = BarSegment::Foreground;
     let mut last_fg_i: Option<u32> = None;
@@ -134,8 +162,8 @@ pub fn find_bar_boundary(
         width,
         "scanning bar boundary"
     );
-    for i in 0..=width {
-        let x = scanline.x_start.saturating_add_signed(i as i32 * dx);
+    for i in 0..width {
+        let x = scanline.x_at(i);
 
         let pixel_rgb = image.get_pixel(x, scanline.y);
         let segment = classifier(*pixel_rgb);
@@ -154,16 +182,14 @@ pub fn find_bar_boundary(
             BarSegment::Unknown => {}
             BarSegment::Background => {
                 if prev_segment == BarSegment::Foreground {
-                    let boundary = (i as f64) / width as f64;
+                    let boundary = i as f64 / width as f64;
                     return Some(boundary);
                 } else if prev_segment == BarSegment::Unknown {
                     if let Some(fg_i) = last_fg_i {
-                        let boundary = (fg_i as f64 + 1.0) / width as f64;
+                        let boundary = (fg_i + 1) as f64 / width as f64;
                         return Some(boundary);
                     }
-                    info!(
-                        "border between foreground and background is hidden by unknown object",
-                    );
+                    info!("border between foreground and background is hidden by unknown object",);
                     return None;
                 }
             }
@@ -174,7 +200,7 @@ pub fn find_bar_boundary(
 
     if prev_segment == BarSegment::Unknown {
         if let Some(fg_i) = last_fg_i {
-            return Some((fg_i as f64 + 1.0) / width as f64);
+            return Some((fg_i + 1) as f64 / width as f64);
         }
     }
 

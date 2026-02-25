@@ -60,4 +60,12 @@ message PlayerState {
   // SA (Super Art) gauge value. 0.0 = empty, 3.0 = full.
   // Computed from stock count (digit display) + gauge bar fill ratio.
   optional double sa_gauge = 2;
+
+  // OD (Drive) gauge value. 0.0 = empty, 6.0 = full.
+  // Absent during burnout.
+  optional double od_gauge = 3;
+
+  // Burnout recovery gauge. 0.0 = just entered burnout, 1.0 = fully recovered.
+  // Absent when not in burnout.
+  optional double burnout_gauge = 4;
 }

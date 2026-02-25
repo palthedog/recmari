@@ -1,239 +1,66 @@
 use image::{Rgb, RgbImage};
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
-use crate::analysis::common::{
-    find_bar_boundary, rgb_to_hsv, BarSegment, HpSegment, Hsv, Scanline,
-};
-use crate::analysis::{DebugRegion, HpReading, Hud, HudType, SaReading};
+use crate::analysis::common::{find_bar_boundary, rgb_to_hsv, BarSegment, Hsv, Scanline};
 use crate::rect::PixelRect;
-use crate::video::frame::Frame;
 
-const REF_WIDTH: u32 = 1920;
-const REF_HEIGHT: u32 = 1080;
-
-/// P1 health bar scanline at 1920x1080.
-const P1_HEALTH: Scanline = Scanline {
-    x_start: 883,
-    x_end: 190,
-    y: 80,
-};
-
-/// P2 health bar — horizontal mirror of P1.
-const P2_HEALTH: Scanline = Scanline {
-    x_start: REF_WIDTH - P1_HEALTH.x_start,
-    x_end: REF_WIDTH - P1_HEALTH.x_end,
-    y: P1_HEALTH.y,
-};
+use super::REF_WIDTH;
 
 /// P1 SA gauge scanline at 1920x1080. Scans left-to-right (gauge fills from edge toward center).
-const P1_SA_GAUGE: Scanline = Scanline {
+pub(super) const P1_SA_GAUGE: Scanline = Scanline {
     x_start: 188,
     x_end: 413,
     y: 1002,
 };
 
 /// P2 SA gauge — horizontal mirror of P1.
-const P2_SA_GAUGE: Scanline = Scanline {
+pub(super) const P2_SA_GAUGE: Scanline = Scanline {
     x_start: REF_WIDTH - P1_SA_GAUGE.x_start,
     x_end: REF_WIDTH - P1_SA_GAUGE.x_end,
     y: P1_SA_GAUGE.y,
 };
 
 /// P1 SA stock digit bounding box at 1920x1080.
-const P1_SA_DIGIT: PixelRect = PixelRect {
+pub(super) const P1_SA_DIGIT: PixelRect = PixelRect {
     x: 120,
     y: 960,
     w: 160 - 120,
     h: 1020 - 960,
 };
 
-/// Probes used to distinguish digits 0–3.
-/// probe[i] is foreground when the displayed digit is i.
-/// Found via: `recmari probe-scan --image both_sa0.png:0 --image both_sa1.png:1
-///   --image both_sa2.png:2 --image both_sa3.png:3`
-const SA_DIGIT_PROBES: [Probe; 4] = [
-    Probe { x: 129, y: 989 }, // foreground for: 0
-    Probe { x: 138, y: 985 }, // foreground for: 1
-    Probe { x: 144, y: 961 }, // foreground for: 2
-    Probe { x: 133, y: 995 }, // foreground for: 3
-];
-
 /// P2 SA stock digit — horizontal mirror of P1.
-const P2_SA_DIGIT: PixelRect = PixelRect {
+pub(super) const P2_SA_DIGIT: PixelRect = PixelRect {
     x: REF_WIDTH - P1_SA_DIGIT.x - P1_SA_DIGIT.w,
     y: P1_SA_DIGIT.y,
     w: P1_SA_DIGIT.w,
     h: P1_SA_DIGIT.h,
 };
 
-/// Thickness of the debug overlay line (pixels at target resolution).
-const DEBUG_LINE_H: u32 = 3;
-
-/// Number of evenly-spaced sample points per scanline for HUD detection.
-const DETECT_SAMPLE_COUNT: u32 = 16;
-
-/// Minimum fraction of recognized pixels to confirm a region as HUD.
-const DETECT_THRESHOLD: f64 = 0.5;
-
 /// Probe point for SA digit recognition, as absolute pixel coordinates
 /// at 1920x1080 reference resolution (P1 side).
 #[derive(Clone, Copy)]
-struct Probe {
-    x: u32,
-    y: u32,
+pub(super) struct Probe {
+    pub(super) x: u32,
+    pub(super) y: u32,
 }
 
-/// The "manemon" HUD analyzer. All layout details are internal.
-pub struct ManemonHud {
-    p1_scan: Scanline,
-    p2_scan: Scanline,
-    p1_sa_scan: Scanline,
-    p2_sa_scan: Scanline,
-    p1_sa_digit_probes: [(u32, u32); 4],
-    p2_sa_digit_probes: [(u32, u32); 4],
-}
-
-impl ManemonHud {
-    pub fn new(frame_width: u32, frame_height: u32) -> Self {
-        assert!(
-            frame_width == 1920 && frame_height == 1080,
-            "currently only supports 1920x1080 videos"
-        );
-
-        let p1_scan = P1_HEALTH.scale_to(frame_width, frame_height, REF_WIDTH, REF_HEIGHT);
-        let p2_scan = P2_HEALTH.scale_to(frame_width, frame_height, REF_WIDTH, REF_HEIGHT);
-        let p1_sa_scan = P1_SA_GAUGE.scale_to(frame_width, frame_height, REF_WIDTH, REF_HEIGHT);
-        let p2_sa_scan = P2_SA_GAUGE.scale_to(frame_width, frame_height, REF_WIDTH, REF_HEIGHT);
-
-        let p1_sa_digit_probes = SA_DIGIT_PROBES.map(|p| (p.x, p.y));
-        let p2_sa_digit_probes =
-            SA_DIGIT_PROBES.map(|p| (P2_SA_DIGIT.x + p.x - P1_SA_DIGIT.x, p.y));
-
-        info!(frame_width, frame_height, "manemon HUD initialized");
-
-        Self {
-            p1_scan,
-            p2_scan,
-            p1_sa_scan,
-            p2_sa_scan,
-            p1_sa_digit_probes,
-            p2_sa_digit_probes,
-        }
-    }
-}
-
-impl Hud for ManemonHud {
-    fn hud_type(&self) -> HudType {
-        HudType::Manemon
-    }
-
-    fn detect_hud(&self, frame: &Frame) -> bool {
-        let total = DETECT_SAMPLE_COUNT * 2;
-
-        let hp_p1 = count_matching_pixels(&frame.image, &self.p1_scan, is_hp_bar_pixel);
-        let hp_p2 = count_matching_pixels(&frame.image, &self.p2_scan, is_hp_bar_pixel);
-        let hp_ratio = (hp_p1 + hp_p2) as f64 / total as f64;
-
-        let sa_p1 = count_matching_pixels(&frame.image, &self.p1_sa_scan, is_sa_gauge_pixel);
-        let sa_p2 = count_matching_pixels(&frame.image, &self.p2_sa_scan, is_sa_gauge_pixel);
-        let sa_ratio = (sa_p1 + sa_p2) as f64 / total as f64;
-
-        debug!(
-            frame_number = frame.frame_number,
-            hp_p1, hp_p2, hp_ratio, sa_p1, sa_p2, sa_ratio, "HUD detection"
-        );
-
-        hp_ratio >= DETECT_THRESHOLD || sa_ratio >= DETECT_THRESHOLD
-    }
-
-    fn analyze_hp(&self, frame: &Frame) -> HpReading {
-        let p1 = find_bar_boundary(&frame.image, &self.p1_scan, |rgb| {
-            classify_hp_pixel(rgb).into()
-        });
-        let p2 = find_bar_boundary(&frame.image, &self.p2_scan, |rgb| {
-            classify_hp_pixel(rgb).into()
-        });
-
-        debug!(
-            frame_number = frame.frame_number,
-            p1, p2, "manemon HP reading"
-        );
-
-        HpReading { p1, p2 }
-    }
-
-    fn analyze_sa(&self, frame: &Frame) -> SaReading {
-        let p1 = read_sa_value(&frame.image, &self.p1_sa_digit_probes, &self.p1_sa_scan);
-        let p2 = read_sa_value(&frame.image, &self.p2_sa_digit_probes, &self.p2_sa_scan);
-
-        debug!(
-            frame_number = frame.frame_number,
-            p1, p2, "manemon SA reading"
-        );
-
-        SaReading { p1, p2 }
-    }
-
-    fn debug_regions(&self) -> Vec<DebugRegion> {
-        let scanline_to_rect = |scan: &Scanline| PixelRect {
-            x: if scan.x_start < scan.x_end {
-                scan.x_start
-            } else {
-                scan.x_end
-            },
-            y: scan.y - DEBUG_LINE_H / 2,
-            w: scan.x_end.abs_diff(scan.x_start) + 1,
-            h: DEBUG_LINE_H,
-        };
-        vec![
-            DebugRegion {
-                rect: scanline_to_rect(&self.p1_scan),
-                color: Rgb([0, 255, 0]),
-            },
-            DebugRegion {
-                rect: scanline_to_rect(&self.p2_scan),
-                color: Rgb([0, 100, 255]),
-            },
-            DebugRegion {
-                rect: scanline_to_rect(&self.p1_sa_scan),
-                color: Rgb([255, 255, 0]),
-            },
-            DebugRegion {
-                rect: scanline_to_rect(&self.p2_sa_scan),
-                color: Rgb([255, 255, 0]),
-            },
-        ]
-    }
-}
-
-/// Sample evenly-spaced pixels along a scanline and count how many pass the classifier.
-fn count_matching_pixels(
-    image: &RgbImage,
-    scanline: &Scanline,
-    classifier: fn(Hsv) -> bool,
-) -> u32 {
-    let width = scanline.width();
-    assert!(width > 0, "scanline has zero width");
-    let dx = scanline.dx();
-
-    let mut count = 0;
-    for i in 0..DETECT_SAMPLE_COUNT {
-        let t = i as f64 / (DETECT_SAMPLE_COUNT - 1) as f64;
-        let offset = (t * width as f64) as i32;
-        let x = scanline.x_start.saturating_add_signed(offset * dx);
-        let pixel = image.get_pixel(x, scanline.y);
-        let hsv = rgb_to_hsv(*pixel);
-
-        if classifier(hsv) {
-            count += 1;
-        }
-    }
-
-    count
-}
+/// Probes used to distinguish digits 0–3.
+/// probe[i] is foreground when the displayed digit is i.
+/// Found via: `recmari probe-scan --image both_sa0.png:0 --image both_sa1.png:1
+///   --image both_sa2.png:2 --image both_sa3.png:3`
+pub(super) const SA_DIGIT_PROBES: [Probe; 4] = [
+    Probe { x: 129, y: 989 }, // foreground for: 0
+    Probe { x: 138, y: 985 }, // foreground for: 1
+    Probe { x: 144, y: 961 }, // foreground for: 2
+    Probe { x: 133, y: 995 }, // foreground for: 3
+];
 
 /// Combine digit recognition with bar fill to produce a 0.0–3.0 SA value.
-fn read_sa_value(image: &RgbImage, probes: &[(u32, u32); 4], sa_scan: &Scanline) -> Option<f64> {
+pub(super) fn read_sa_value(
+    image: &RgbImage,
+    probes: &[(u32, u32); 4],
+    sa_scan: &Scanline,
+) -> Option<f64> {
     let Some(stock) = classify_sa_digit(image, probes) else {
         warn!("SA digit classification failed");
         return None;
@@ -250,11 +77,7 @@ fn read_sa_value(image: &RgbImage, probes: &[(u32, u32); 4], sa_scan: &Scanline)
         return None;
     };
 
-    assert!(
-        bar_fill < 1.0,
-        "bar_fill must be < 1.0, got {bar_fill} (stock={stock})"
-    );
-
+    assert!(bar_fill <= 1.0, "bar_fill must be 0.0–1.0, got {bar_fill}");
     Some(stock as f64 + bar_fill)
 }
 
@@ -335,19 +158,8 @@ fn is_digit_outline_pixel(hsv: Hsv) -> bool {
     hsv.h >= 55.0 && hsv.h <= 75.0 && hsv.s >= 0.25 && hsv.v >= 0.75
 }
 
-/// HP bar pixel for detection. Excludes the loose border heuristic
-/// to avoid false positives on bright scenes (e.g. white transition screens).
-fn is_hp_bar_pixel(hsv: Hsv) -> bool {
-    is_hp_healthy(hsv) || is_hp_background(hsv) || is_damage(hsv)
-}
-
-/// Yellow HP bar pixel without the loose border check.
-fn is_hp_healthy(hsv: Hsv) -> bool {
-    hsv.h >= 50.0 && hsv.h <= 65.0 && hsv.s >= 0.3 && hsv.v >= 0.9
-}
-
 /// SA gauge pixel — any recognized gauge state.
-fn is_sa_gauge_pixel(hsv: Hsv) -> bool {
+pub(super) fn is_sa_gauge_pixel(hsv: Hsv) -> bool {
     is_gauge_empty(hsv) || is_gauge_sa(hsv) || is_gauge_ca(hsv)
 }
 
@@ -369,21 +181,6 @@ fn is_gauge_ca(hsv: Hsv) -> bool {
     hsv.h >= 300.0 && hsv.h <= 345.0 && hsv.s >= 0.15 && hsv.v >= 0.85
 }
 
-fn is_hp_border(hsv: Hsv) -> bool {
-    hsv.s < 0.25 && hsv.v > 0.9
-}
-
-fn is_provisional_damage(hsv: Hsv) -> bool {
-    hsv.s < 0.1 && hsv.v >= 0.6 && hsv.v <= 0.9
-}
-fn is_hp_background(hsv: Hsv) -> bool {
-    hsv.h > 215.0 && hsv.h < 222.0 && hsv.s > 0.95
-}
-
-fn is_damage(hsv: Hsv) -> bool {
-    hsv.h >= 17.0 && hsv.h <= 25.0 && hsv.s >= 0.9 && hsv.v >= 0.9
-}
-
 fn classify_sa_pixel(rgb: Rgb<u8>) -> BarSegment {
     let hsv = rgb_to_hsv(rgb);
     if is_gauge_sa(hsv) {
@@ -392,23 +189,6 @@ fn classify_sa_pixel(rgb: Rgb<u8>) -> BarSegment {
         BarSegment::Background
     } else {
         BarSegment::Unknown
-    }
-}
-
-fn classify_hp_pixel(rgb: Rgb<u8>) -> HpSegment {
-    let hsv = rgb_to_hsv(rgb);
-    if is_hp_healthy(hsv) {
-        HpSegment::Healthy
-    } else if is_hp_border(hsv) {
-        HpSegment::Border
-    } else if is_damage(hsv) {
-        HpSegment::Damage
-    } else if is_provisional_damage(hsv) {
-        HpSegment::ProvisionalDamage
-    } else if is_hp_background(hsv) {
-        HpSegment::Background
-    } else {
-        HpSegment::Unknown
     }
 }
 
@@ -428,11 +208,13 @@ pub struct ProbeScanEntry {
 /// are excluded.
 pub fn scan_sa_digit_probes(digit_images: &[(RgbImage, u8)]) -> Vec<ProbeScanEntry> {
     assert!(!digit_images.is_empty(), "need at least one image");
+    let ref_width = super::REF_WIDTH;
+    let ref_height = super::REF_HEIGHT;
     for (img, d) in digit_images {
         assert!(*d <= 3, "digit must be 0–3, got {d}");
         assert!(
-            img.width() >= REF_WIDTH && img.height() >= REF_HEIGHT,
-            "image too small: {}x{}, need at least {REF_WIDTH}x{REF_HEIGHT}",
+            img.width() >= ref_width && img.height() >= ref_height,
+            "image too small: {}x{}, need at least {ref_width}x{ref_height}",
             img.width(),
             img.height(),
         );
@@ -522,14 +304,6 @@ mod tests {
                 probes[0].1,
             );
         }
-    }
-
-    #[test]
-    fn frame_2640_p1_sa_bar_fill_less_than_one() {
-        let img = load_fixture("frame_2640.png");
-        let fill = find_bar_boundary(&img, &P1_SA_GAUGE, classify_sa_pixel);
-        let fill = fill.expect("bar fill should be detected");
-        assert!(fill < 1.0, "digit=0 but bar_fill={fill}, must be < 1.0");
     }
 
     fn assert_sa_approx(actual: Option<f64>, expected: f64, tolerance: f64, label: &str) {
