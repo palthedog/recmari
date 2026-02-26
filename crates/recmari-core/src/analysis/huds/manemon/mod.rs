@@ -7,12 +7,12 @@ pub use sa::{scan_sa_digit_probes, ProbeScanEntry};
 use image::{Rgb, RgbImage};
 use tracing::{debug, info};
 
-use crate::analysis::common::{find_bar_boundary, rgb_to_hsv, Hsv, Scanline};
+use crate::analysis::common::{rgb_to_hsv, Hsv, Scanline};
 use crate::analysis::{DebugRegion, HpReading, Hud, HudType, OdReading, OdValue, SaReading};
 use crate::rect::PixelRect;
 use crate::video::frame::Frame;
 
-use hp::{classify_hp_pixel, is_hp_bar_pixel, P1_HEALTH, P2_HEALTH};
+use hp::{is_hp_bar_pixel, P1_HEALTH, P2_HEALTH};
 use od::{is_od_gauge_pixel, read_od_value, P1_OD_GAUGE, P2_OD_GAUGE};
 use sa::{
     is_sa_gauge_pixel, read_sa_value, P1_SA_DIGIT, P1_SA_GAUGE, P2_SA_DIGIT, P2_SA_GAUGE,
@@ -109,12 +109,8 @@ impl Hud for ManemonHud {
     }
 
     fn analyze_hp(&self, frame: &Frame) -> HpReading {
-        let p1 = find_bar_boundary(&frame.image, &self.p1_scan, |rgb| {
-            classify_hp_pixel(rgb).into()
-        });
-        let p2 = find_bar_boundary(&frame.image, &self.p2_scan, |rgb| {
-            classify_hp_pixel(rgb).into()
-        });
+        let p1 = hp::analyze_hp(&frame.image, &self.p1_scan);
+        let p2 = hp::analyze_hp(&frame.image, &self.p2_scan);
 
         debug!(
             frame_number = frame.frame_number,
@@ -219,4 +215,45 @@ fn count_matching_pixels(
     }
 
     count
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use image::RgbImage;
+    use tracing_test::traced_test;
+
+    use super::*;
+
+    fn load_fixture(name: &str) -> RgbImage {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/frames")
+            .join(name);
+        image::open(&path)
+            .unwrap_or_else(|e| panic!("failed to load {}: {}", path.display(), e))
+            .into_rgb8()
+    }
+
+    fn load_fixture_frame(name: &str) -> Frame {
+        let image = load_fixture(name);
+        Frame {
+            frame_number: 0,
+            timestamp_seconds: 0.0,
+            image,
+        }
+    }
+
+    #[test]
+    #[traced_test]
+    fn test_classify_hp_pixel_covered() {
+        let frame = load_fixture_frame("p2_hp_head_covered.png");
+        let hud = ManemonHud::new(frame.image.width(), frame.image.height());
+
+        let hp = hud.analyze_hp(&frame);
+        assert!(hp.p1.is_some());
+        assert!(hp.p2.is_some());
+        assert!((hp.p1.unwrap() - 1.0).abs() < 0.05);
+        assert!((hp.p2.unwrap() - 0.93).abs() < 0.05);
+    }
 }

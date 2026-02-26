@@ -5,7 +5,7 @@ package recmari;
 message Match {
   // Source information for this match.
   SourceMetadata source = 1;
-  // Rounds in this match (chronological order, typically 2-3).
+  // Rounds in this match (chr`onological order, typically 2-3).
   repeated Round rounds = 2;
 }
 
