@@ -26,7 +26,13 @@ pub(super) fn is_hp_bar_pixel(hsv: Hsv) -> bool {
 }
 
 fn is_hp_bar_frame(hsv: Hsv) -> bool {
-    hsv.h > 210.0 && hsv.h < 230.0 && hsv.s > 0.8 && hsv.v > 0.75
+    // pi side
+    if hsv.h > 210.0 && hsv.h < 230.0 && hsv.s > 0.8 && hsv.v > 0.75 {
+        return true;
+    }
+
+    // p2 side has darker frame color.
+    hsv.h > 210.0 && hsv.h < 230.0 && hsv.s > 0.4 && hsv.s < 0.6 && hsv.v > 0.4 && hsv.v < 0.6
 }
 
 /// HP bar fill at normal health levels (yellow, H≈49-64°).
@@ -133,7 +139,7 @@ fn find_border(image: &RgbImage, scanline: &Scanline) -> Option<u32> {
         }
     }
 
-    if background_count > 10 {
+    if background_count > 10 && first_background_i < 4 {
         let x = scanline.x_at(first_background_i as u32);
         let mut bg_count = 0;
         for y in (scanline.y - 2)..=(scanline.y + 2) {
@@ -235,6 +241,15 @@ mod tests {
 
     #[test]
     #[traced_test]
+    fn test_find_border_p2_hp_border_hidden() {
+        let image = load_fixture("p2_hp_border_hidden.png");
+        let border = find_border(&image, &P2_HEALTH);
+
+        assert_eq!(None, border);
+    }
+
+    #[test]
+    #[traced_test]
     fn test_analyze_hp() {
         let image = load_fixture("p2_hp_head_covered.png");
         let hp = analyze_hp(&image, &P2_HEALTH);
@@ -276,5 +291,16 @@ mod tests {
         let image = load_fixture("frame_1800.png");
         let hp = analyze_hp(&image, &P1_HEALTH);
         assert_hp(Some(0.85), hp);
+    }
+
+    #[test]
+    #[traced_test]
+    fn test_round_start() {
+        let image = load_fixture("round1_fight.png");
+        let hp = analyze_hp(&image, &P1_HEALTH);
+        assert_hp(Some(1.0), hp);
+
+        let hp = analyze_hp(&image, &P2_HEALTH);
+        assert_hp(Some(1.0), hp);
     }
 }

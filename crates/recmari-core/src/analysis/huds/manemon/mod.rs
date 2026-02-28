@@ -19,6 +19,12 @@ use sa::{
     SA_DIGIT_PROBES,
 };
 
+const SA_FRAME: Scanline = Scanline {
+    x_start: 208,
+    x_end: 220,
+    y: 1027,
+};
+
 const REF_WIDTH: u32 = 1920;
 const REF_HEIGHT: u32 = 1080;
 
@@ -76,36 +82,31 @@ impl ManemonHud {
     }
 }
 
+fn is_ca_frame(hsv: Hsv) -> bool {
+    hsv.h > 190.0 && hsv.h < 210.0 && hsv.s > 0.9 && hsv.v > 0.9
+}
+
+fn is_sa_frame(hsv: Hsv) -> bool {
+    hsv.h > 210.0 && hsv.h < 230.0 && hsv.s > 0.9 && hsv.v > 0.9
+}
+
 impl Hud for ManemonHud {
     fn hud_type(&self) -> HudType {
         HudType::Manemon
     }
 
     fn detect_hud(&self, frame: &Frame) -> bool {
-        // TODO: Rewrite this method from scratch.
-        // We don't need to rely on all of hp/sa/od detection.
-        // Instead, we can just sample a few "STABLE" pixels.
-
-        let total = DETECT_SAMPLE_COUNT * 2;
-
-        let hp_p1 = count_matching_pixels(&frame.image, &self.p1_scan, is_hp_bar_pixel);
-        let hp_p2 = count_matching_pixels(&frame.image, &self.p2_scan, is_hp_bar_pixel);
-        let hp_ratio = (hp_p1 + hp_p2) as f64 / total as f64;
-
-        let sa_p1 = count_matching_pixels(&frame.image, &self.p1_sa_scan, is_sa_gauge_pixel);
-        let sa_p2 = count_matching_pixels(&frame.image, &self.p2_sa_scan, is_sa_gauge_pixel);
-        let sa_ratio = (sa_p1 + sa_p2) as f64 / total as f64;
-
-        let od_p1 = count_matching_pixels(&frame.image, &self.p1_od_scan, is_od_gauge_pixel);
-        let od_p2 = count_matching_pixels(&frame.image, &self.p2_od_scan, is_od_gauge_pixel);
-        let od_ratio = (od_p1 + od_p2) as f64 / total as f64;
-
-        debug!(
-            frame_number = frame.frame_number,
-            hp_p1, hp_p2, hp_ratio, sa_p1, sa_p2, sa_ratio, od_p1, od_p2, od_ratio, "HUD detection"
-        );
-
-        hp_ratio >= DETECT_THRESHOLD || sa_ratio >= DETECT_THRESHOLD || od_ratio >= DETECT_THRESHOLD
+        // Check SA gauge's frame since it's not covered by other objects.
+        for i in 0..SA_FRAME.width() {
+            let x = SA_FRAME.x_at(i);
+            let pixel = frame.image.get_pixel(x, SA_FRAME.y);
+            let hsv = rgb_to_hsv(*pixel);
+            debug!("SA frame check @{x}: {hsv}");
+            if !is_sa_frame(hsv) && !is_ca_frame(hsv) {
+                return false;
+            }
+        }
+        true
     }
 
     fn analyze_hp(&self, frame: &Frame) -> HpReading {
@@ -255,5 +256,29 @@ mod tests {
         assert!(hp.p2.is_some());
         assert!((hp.p1.unwrap() - 1.0).abs() < 0.05);
         assert!((hp.p2.unwrap() - 0.93).abs() < 0.05);
+    }
+
+    #[test]
+    #[traced_test]
+    fn test_detect_hud_sa() {
+        let frame = load_fixture_frame("round1_fight.png");
+        let hud = ManemonHud::new(frame.image.width(), frame.image.height());
+        assert!(hud.detect_hud(&frame));
+    }
+
+    #[test]
+    #[traced_test]
+    fn test_detect_hud_ca() {
+        let frame = load_fixture_frame("p1_ca.png");
+        let hud = ManemonHud::new(frame.image.width(), frame.image.height());
+        assert!(hud.detect_hud(&frame));
+    }
+
+    #[test]
+    #[traced_test]
+    fn test_detect_hud_no_hud() {
+        let frame = load_fixture_frame("no_hud.png");
+        let hud = ManemonHud::new(frame.image.width(), frame.image.height());
+        assert!(!hud.detect_hud(&frame));
     }
 }
