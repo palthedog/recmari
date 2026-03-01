@@ -158,11 +158,6 @@ fn is_digit_outline_pixel(hsv: Hsv) -> bool {
     hsv.h >= 55.0 && hsv.h <= 75.0 && hsv.s >= 0.25 && hsv.v >= 0.75
 }
 
-/// SA gauge pixel — any recognized gauge state.
-pub(super) fn is_sa_gauge_pixel(hsv: Hsv) -> bool {
-    is_gauge_empty(hsv) || is_gauge_sa(hsv) || is_gauge_ca(hsv)
-}
-
 /// Depleted SA gauge background. Same hue as HP bar background,
 /// with a V floor to reject VS screen's dim blue (V≈0.30-0.39).
 fn is_gauge_empty(hsv: Hsv) -> bool {
@@ -174,11 +169,6 @@ fn is_gauge_sa(hsv: Hsv) -> bool {
     let p1_pink = hsv.h >= 320.0;
     let p2_cyan = hsv.h >= 175.0 && hsv.h <= 210.0;
     (p1_pink || p2_cyan) && hsv.s >= 0.15 && hsv.v >= 0.80
-}
-
-/// CA ready.
-fn is_gauge_ca(hsv: Hsv) -> bool {
-    hsv.h >= 300.0 && hsv.h <= 345.0 && hsv.s >= 0.15 && hsv.v >= 0.85
 }
 
 fn classify_sa_pixel(rgb: Rgb<u8>) -> BarSegment {

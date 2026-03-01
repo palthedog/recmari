@@ -1,12 +1,21 @@
 syntax = "proto3";
 package recmari;
 
+// Which player won a round or match.
+enum Winner {
+  WINNER_UNKNOWN = 0;
+  WINNER_P1 = 1;
+  WINNER_P2 = 2;
+}
+
 // A single match (first-to-2 rounds). The basic unit of analysis.
 message Match {
   // Source information for this match.
   SourceMetadata source = 1;
-  // Rounds in this match (chr`onological order, typically 2-3).
+  // Rounds in this match (chronological order, typically 2-3).
   repeated Round rounds = 2;
+  // Overall match winner.
+  Winner winner = 3;
 }
 
 // Where the match was extracted from.
@@ -37,6 +46,8 @@ message Round {
   uint32 round_index = 1;
   // Sampled frame data during this round (chronological order).
   repeated FrameData frames = 2;
+  // Round winner (determined by HP comparison at the last frame).
+  Winner winner = 3;
 }
 
 // Game state extracted from a single frame.

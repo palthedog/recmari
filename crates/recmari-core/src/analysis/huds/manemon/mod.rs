@@ -4,7 +4,7 @@ mod sa;
 
 pub use sa::{scan_sa_digit_probes, ProbeScanEntry};
 
-use image::{Rgb, RgbImage};
+use image::Rgb;
 use tracing::{debug, info};
 
 use crate::analysis::common::{rgb_to_hsv, Hsv, Scanline};
@@ -12,12 +12,9 @@ use crate::analysis::{DebugRegion, HpReading, Hud, HudType, OdReading, OdValue, 
 use crate::rect::PixelRect;
 use crate::video::frame::Frame;
 
-use hp::{is_hp_bar_pixel, P1_HEALTH, P2_HEALTH};
-use od::{is_od_gauge_pixel, read_od_value, P1_OD_GAUGE, P2_OD_GAUGE};
-use sa::{
-    is_sa_gauge_pixel, read_sa_value, P1_SA_DIGIT, P1_SA_GAUGE, P2_SA_DIGIT, P2_SA_GAUGE,
-    SA_DIGIT_PROBES,
-};
+use hp::{P1_HEALTH, P2_HEALTH};
+use od::{read_od_value, P1_OD_GAUGE, P2_OD_GAUGE};
+use sa::{read_sa_value, P1_SA_DIGIT, P1_SA_GAUGE, P2_SA_DIGIT, P2_SA_GAUGE, SA_DIGIT_PROBES};
 
 const SA_FRAME: Scanline = Scanline {
     x_start: 208,
@@ -30,12 +27,6 @@ const REF_HEIGHT: u32 = 1080;
 
 /// Thickness of the debug overlay line (pixels at target resolution).
 const DEBUG_LINE_H: u32 = 3;
-
-/// Number of evenly-spaced sample points per scanline for HUD detection.
-const DETECT_SAMPLE_COUNT: u32 = 16;
-
-/// Minimum fraction of recognized pixels to confirm a region as HUD.
-const DETECT_THRESHOLD: f64 = 0.5;
 
 /// The "manemon" HUD analyzer. All layout details are internal.
 pub struct ManemonHud {
@@ -191,31 +182,6 @@ impl Hud for ManemonHud {
             },
         ]
     }
-}
-
-/// Sample evenly-spaced pixels along a scanline and count how many pass the classifier.
-fn count_matching_pixels(
-    image: &RgbImage,
-    scanline: &Scanline,
-    classifier: fn(Hsv) -> bool,
-) -> u32 {
-    let width = scanline.width();
-    assert!(width > 0, "scanline has zero width");
-
-    let mut count = 0;
-    for i in 0..DETECT_SAMPLE_COUNT {
-        let t = i as f64 / (DETECT_SAMPLE_COUNT - 1) as f64;
-        let offset = (t * (width - 1) as f64) as u32;
-        let x = scanline.x_at(offset);
-        let pixel = image.get_pixel(x, scanline.y);
-        let hsv = rgb_to_hsv(*pixel);
-
-        if classifier(hsv) {
-            count += 1;
-        }
-    }
-
-    count
 }
 
 #[cfg(test)]

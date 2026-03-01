@@ -19,20 +19,14 @@ pub(super) const P2_HEALTH: Scanline = Scanline {
     y: P1_HEALTH.y,
 };
 
-/// HP bar pixel for detection. Excludes the loose border heuristic
-/// to avoid false positives on bright scenes (e.g. white transition screens).
-pub(super) fn is_hp_bar_pixel(hsv: Hsv) -> bool {
-    is_hp_healthy(hsv) || is_hp_background(hsv) || is_damage(hsv)
-}
-
 fn is_hp_bar_frame(hsv: Hsv) -> bool {
-    // pi side
+    // P1 side
     if hsv.h > 210.0 && hsv.h < 230.0 && hsv.s > 0.8 && hsv.v > 0.75 {
         return true;
     }
 
-    // p2 side has darker frame color.
-    hsv.h > 210.0 && hsv.h < 230.0 && hsv.s > 0.4 && hsv.s < 0.7 && hsv.v > 0.4 && hsv.v < 0.7
+    // P2 side has darker frame color.
+    hsv.h > 210.0 && hsv.h < 240.0 && hsv.s > 0.4 && hsv.s < 0.7 && hsv.v > 0.4 && hsv.v < 0.7
 }
 
 /// HP bar fill at normal health levels (yellow, H≈49-64°).
@@ -43,11 +37,6 @@ fn is_hp_yellow(hsv: Hsv) -> bool {
 /// HP bar fill at low health below ~25% (orange, H≈40-49°).
 fn is_hp_orange(hsv: Hsv) -> bool {
     hsv.h >= 38.0 && hsv.h <= 50.0 && hsv.s >= 0.85 && hsv.v >= 0.9
-}
-
-/// HP bar fill — yellow (normal) or orange (low health).
-fn is_hp_healthy(hsv: Hsv) -> bool {
-    is_hp_yellow(hsv) || is_hp_orange(hsv)
 }
 
 fn is_hp_border_white(hsv: Hsv) -> bool {

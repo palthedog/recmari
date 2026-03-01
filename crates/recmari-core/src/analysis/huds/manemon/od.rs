@@ -90,7 +90,7 @@ fn is_partial_background_green(hsv: Hsv) -> bool {
 }
 
 fn is_partial_fill_border_green(hsv: Hsv) -> bool {
-    hsv.h > 95.0 && hsv.h < 130.0 && hsv.s > 0.50 && hsv.v > 0.80
+    hsv.h > 95.0 && hsv.h < 165.0 && hsv.s > 0.30 && hsv.v > 0.80
 }
 
 fn is_partial_background(hsv: Hsv) -> bool {
@@ -404,33 +404,6 @@ fn classify_burnout_pixel(rgb: Rgb<u8>) -> BarSegment {
     }
 }
 
-/// OD segment fill: green at high gauge (H≈75-120°).
-fn is_od_green(hsv: Hsv) -> bool {
-    hsv.h >= 70.0 && hsv.h <= 120.0 && hsv.s >= 0.75 && hsv.v >= 0.80
-}
-
-/// OD segment fill: orange at low gauge (H≈22-55°), appears below ~3 bars.
-/// Upper bound extended past 50° to capture yellow-orange pixels at gauge edges
-/// that have H≈50-51° due to sub-pixel blending.
-fn is_od_orange(hsv: Hsv) -> bool {
-    hsv.h >= 22.0 && hsv.h <= 55.0 && hsv.s >= 0.60 && hsv.v >= 0.70
-}
-
-/// Filled OD segment — either green (high gauge) or orange (low gauge).
-fn is_od_filled(hsv: Hsv) -> bool {
-    is_od_green(hsv) || is_od_orange(hsv)
-}
-
-/// Empty/depleted OD segment (dark blue, same family as SA empty).
-fn is_od_empty(hsv: Hsv) -> bool {
-    hsv.h >= 213.0 && hsv.h <= 225.0 && hsv.s >= 0.85 && hsv.v >= 0.55
-}
-
-/// OD gauge pixel — either filled or empty.
-pub(super) fn is_od_gauge_pixel(hsv: Hsv) -> bool {
-    is_od_filled(hsv) || is_od_empty(hsv)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -537,22 +510,6 @@ mod tests {
             let state = classify_od_segment(&image, &p1_seg_scanlines[i]);
             assert_od_segment(&format!("P1 Segment {i}"), state, expected[i as usize]);
         }
-
-        /*
-        let p2_seg_scanlines = get_p2_od_segments();
-        let expected = [
-            OdSegmentState::Full,
-            OdSegmentState::Full,
-            OdSegmentState::Full,
-            OdSegmentState::Partial(0.37),
-            OdSegmentState::Empty,
-            OdSegmentState::Empty,
-        ];
-        for i in 0..6 {
-            let state = classify_od_segment(&image, &p2_seg_scanlines[i]);
-            assert_od_segment(&format!("P2 Segment {i}"), state, expected[i as usize]);
-        }
-        */
     }
 
     #[test]

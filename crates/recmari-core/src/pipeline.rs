@@ -5,6 +5,7 @@ use tracing::info;
 
 use recmari_proto::proto::{
     source_metadata::Source, FrameData, Match, PlayerState, Round, SourceMetadata, VideoFileSource,
+    Winner,
 };
 
 use crate::analysis::huds::manemon::ManemonHud;
@@ -17,6 +18,9 @@ use crate::video::frame::Frame;
 const ROUND_RESET_THRESHOLD: f64 = 0.95;
 /// At least one player's health must drop below this to arm round detection.
 const DAMAGE_THRESHOLD: f64 = 0.5;
+/// Number of round wins required to win a match.
+const ROUNDS_TO_WIN: u32 = 2;
+
 /// Parameters for the analysis pipeline.
 pub struct PipelineConfig {
     /// Analyze every Nth decoded frame (1 = every frame).
@@ -93,10 +97,13 @@ pub fn run_pipeline(input: &Path, config: &PipelineConfig) -> Result<Vec<Match>>
         "frame collection complete"
     );
 
-    let m = segment_into_match(&frame_data, input);
-    info!(round_count = m.rounds.len(), "pipeline complete");
+    let matches = segment_into_matches(&frame_data, input);
+    for (i, m) in matches.iter().enumerate() {
+        log_match_summary(i + 1, m);
+    }
+    info!(match_count = matches.len(), "pipeline complete");
 
-    Ok(vec![m])
+    Ok(matches)
 }
 
 fn collect_frame_data(
@@ -210,26 +217,115 @@ fn od_to_player_state(hp: Option<f64>, sa: Option<f64>, od: Option<OdValue>) -> 
     }
 }
 
-fn segment_into_match(frames: &[FrameData], input: &Path) -> Match {
-    let round_frames = split_into_rounds(frames);
-    let rounds: Vec<Round> = round_frames
+struct RoundResult {
+    winner: Winner,
+    p1_hp: Option<f64>,
+    p2_hp: Option<f64>,
+}
+
+fn round_result(frames: &[FrameData]) -> RoundResult {
+    for fd in frames.iter().rev() {
+        let p1_hp = fd.player1.as_ref().and_then(|p| p.health_ratio);
+        let p2_hp = fd.player2.as_ref().and_then(|p| p.health_ratio);
+        match (p1_hp, p2_hp) {
+            (Some(p1), Some(p2)) => {
+                let winner = if p1 > p2 {
+                    Winner::P1
+                } else if p2 > p1 {
+                    Winner::P2
+                } else {
+                    Winner::Unknown
+                };
+                return RoundResult {
+                    winner,
+                    p1_hp: Some(p1),
+                    p2_hp: Some(p2),
+                };
+            }
+            _ => continue,
+        }
+    }
+    RoundResult {
+        winner: Winner::Unknown,
+        p1_hp: None,
+        p2_hp: None,
+    }
+}
+
+fn segment_into_matches(frames: &[FrameData], input: &Path) -> Vec<Match> {
+    let all_rounds = split_into_rounds(frames);
+    let file_path = input.to_string_lossy().into_owned();
+
+    let mut matches: Vec<Match> = Vec::new();
+    let mut current_rounds: Vec<Vec<FrameData>> = Vec::new();
+    let mut p1_wins = 0u32;
+    let mut p2_wins = 0u32;
+
+    for round_frames in all_rounds {
+        match round_result(&round_frames).winner {
+            Winner::P1 => p1_wins += 1,
+            Winner::P2 => p2_wins += 1,
+            Winner::Unknown => {}
+        }
+        current_rounds.push(round_frames);
+
+        if p1_wins >= ROUNDS_TO_WIN || p2_wins >= ROUNDS_TO_WIN {
+            let m = build_match(
+                &file_path,
+                current_rounds.drain(..).collect(),
+                p1_wins,
+                p2_wins,
+            );
+            matches.push(m);
+            p1_wins = 0;
+            p2_wins = 0;
+        }
+    }
+
+    if !current_rounds.is_empty() {
+        let m = build_match(&file_path, current_rounds, p1_wins, p2_wins);
+        matches.push(m);
+    }
+
+    info!(match_count = matches.len(), "match segmentation complete");
+    matches
+}
+
+fn build_match(
+    file_path: &str,
+    round_frames: Vec<Vec<FrameData>>,
+    p1_wins: u32,
+    p2_wins: u32,
+) -> Match {
+    let start_seconds = round_frames
+        .first()
+        .and_then(|r| r.first())
+        .map(|f| f.timestamp_seconds)
+        .unwrap_or(0.0);
+
+    let rounds = round_frames
         .into_iter()
         .enumerate()
         .map(|(i, f)| make_round(i as u32, f))
         .collect();
 
-    let start_seconds = frames.first().map(|f| f.timestamp_seconds).unwrap_or(0.0);
-
-    info!(round_count = rounds.len(), start_seconds, "match built");
+    let winner = if p1_wins >= ROUNDS_TO_WIN {
+        Winner::P1
+    } else if p2_wins >= ROUNDS_TO_WIN {
+        Winner::P2
+    } else {
+        Winner::Unknown
+    };
 
     Match {
         source: Some(SourceMetadata {
             source: Some(Source::VideoFile(VideoFileSource {
-                file_path: input.to_string_lossy().into_owned(),
+                file_path: file_path.to_owned(),
                 start_seconds,
             })),
         }),
         rounds,
+        winner: winner.into(),
     }
 }
 
@@ -266,16 +362,49 @@ fn split_into_rounds(frames: &[FrameData]) -> Vec<Vec<FrameData>> {
         rounds.last_mut().unwrap().push(fd.clone());
     }
 
-    rounds.retain(|r| !r.is_empty());
+    rounds.retain(|r| !r.is_empty() && !is_reset_only(r));
     info!(round_count = rounds.len(), "round splitting complete");
     rounds
 }
 
+/// Returns true if every frame with readable HP shows both players near full health.
+/// These rounds are artifacts from match-to-match transitions (HP reset visible briefly
+/// before HUD disappears for the rematch screen).
+fn is_reset_only(frames: &[FrameData]) -> bool {
+    frames.iter().all(|fd| {
+        let p1 = fd.player1.as_ref().and_then(|p| p.health_ratio);
+        let p2 = fd.player2.as_ref().and_then(|p| p.health_ratio);
+        match (p1, p2) {
+            (Some(p1), Some(p2)) => p1 >= ROUND_RESET_THRESHOLD && p2 >= ROUND_RESET_THRESHOLD,
+            _ => true,
+        }
+    })
+}
+
 fn make_round(round_index: u32, frames: Vec<FrameData>) -> Round {
+    let result = round_result(&frames);
     Round {
         round_index,
         frames,
+        winner: result.winner.into(),
     }
+}
+
+fn log_match_summary(match_number: usize, m: &Match) {
+    info!("* Match number {}", match_number);
+    for round in &m.rounds {
+        let result = round_result(&round.frames);
+        let round_index = round.round_index;
+        let p1_hp = result.p1_hp;
+        let p2_hp = result.p2_hp;
+        info!(
+            "  round {round_index}: winner: {:?}, final HP: P1={p1_hp:.2?}, P2={p2_hp:.2?}",
+            result.winner,
+        );
+    }
+
+    let winner = Winner::try_from(m.winner).unwrap_or(Winner::Unknown);
+    info!(match_number, winner = ?winner, "  match result");
 }
 
 #[cfg(test)]
@@ -330,18 +459,81 @@ mod tests {
     }
 
     #[test]
-    fn segment_builds_single_match() {
+    fn segment_two_rounds_one_match() {
         let frames = vec![
             fd(0, 0.0, 1.0, 1.0),
             fd(1, 0.5, 0.6, 0.3),
-            fd(2, 1.0, 0.8, 0.0),
-            fd(3, 1.5, 1.0, 1.0), // reset — new round
-            fd(4, 2.0, 0.9, 0.8),
+            fd(2, 1.0, 0.8, 0.0), // P1 wins round 1
+            fd(3, 1.5, 1.0, 1.0), // reset
+            fd(4, 2.0, 0.7, 0.0), // P1 wins round 2 → match complete
         ];
         let input = Path::new("test.mp4");
-        let m = segment_into_match(&frames, input);
-        assert_eq!(m.rounds.len(), 2);
-        assert_eq!(m.rounds[0].round_index, 0);
-        assert_eq!(m.rounds[1].round_index, 1);
+        let matches = segment_into_matches(&frames, input);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].rounds.len(), 2);
+        assert_eq!(matches[0].winner, Winner::P1 as i32);
+        assert_eq!(matches[0].rounds[0].winner, Winner::P1 as i32);
+        assert_eq!(matches[0].rounds[1].winner, Winner::P1 as i32);
+    }
+
+    #[test]
+    fn segment_six_rounds_into_multiple_matches() {
+        let frames = vec![
+            // Match 1: P1 wins 2-0
+            fd(0, 0.0, 1.0, 1.0),
+            fd(1, 0.5, 0.5, 0.0), // P1 wins R1
+            fd(2, 1.0, 1.0, 1.0), // reset
+            fd(3, 1.5, 0.6, 0.0), // P1 wins R2 → match 1 done
+            fd(4, 2.0, 1.0, 1.0), // reset
+            // Match 2: P2 wins 2-1
+            fd(5, 2.5, 0.0, 0.4),  // P2 wins R1
+            fd(6, 3.0, 1.0, 1.0),  // reset
+            fd(7, 3.5, 0.7, 0.0),  // P1 wins R2
+            fd(8, 4.0, 1.0, 1.0),  // reset
+            fd(9, 4.5, 0.0, 0.3),  // P2 wins R3 → match 2 done
+            fd(10, 5.0, 1.0, 1.0), // reset
+            // Match 3: incomplete (1 round)
+            fd(11, 5.5, 0.8, 0.0), // P1 wins R1
+        ];
+        let input = Path::new("test.mp4");
+        let matches = segment_into_matches(&frames, input);
+        assert_eq!(matches.len(), 3);
+
+        assert_eq!(matches[0].rounds.len(), 2);
+        assert_eq!(matches[0].winner, Winner::P1 as i32);
+
+        assert_eq!(matches[1].rounds.len(), 3);
+        assert_eq!(matches[1].winner, Winner::P2 as i32);
+        assert_eq!(matches[1].rounds[0].winner, Winner::P2 as i32);
+        assert_eq!(matches[1].rounds[1].winner, Winner::P1 as i32);
+        assert_eq!(matches[1].rounds[2].winner, Winner::P2 as i32);
+
+        assert_eq!(matches[2].rounds.len(), 1);
+        assert_eq!(matches[2].winner, Winner::Unknown as i32);
+    }
+
+    #[test]
+    fn round_winner_skips_trailing_none_hp() {
+        let frames = vec![
+            fd(0, 0.0, 1.0, 1.0),
+            fd(1, 0.5, 0.3, 0.0), // KO visible
+            FrameData {
+                frame_number: 2,
+                timestamp_seconds: 1.0,
+                player1: Some(PlayerState {
+                    health_ratio: None,
+                    sa_gauge: None,
+                    od_gauge: None,
+                    burnout_gauge: None,
+                }),
+                player2: Some(PlayerState {
+                    health_ratio: None,
+                    sa_gauge: None,
+                    od_gauge: None,
+                    burnout_gauge: None,
+                }),
+            },
+        ];
+        assert_eq!(round_result(&frames).winner, Winner::P1);
     }
 }
