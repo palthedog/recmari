@@ -32,7 +32,7 @@ fn is_hp_bar_frame(hsv: Hsv) -> bool {
     }
 
     // p2 side has darker frame color.
-    hsv.h > 210.0 && hsv.h < 230.0 && hsv.s > 0.4 && hsv.s < 0.6 && hsv.v > 0.4 && hsv.v < 0.6
+    hsv.h > 210.0 && hsv.h < 230.0 && hsv.s > 0.4 && hsv.s < 0.7 && hsv.v > 0.4 && hsv.v < 0.7
 }
 
 /// HP bar fill at normal health levels (yellow, H≈49-64°).

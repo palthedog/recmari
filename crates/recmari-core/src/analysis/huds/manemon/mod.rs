@@ -83,11 +83,11 @@ impl ManemonHud {
 }
 
 fn is_ca_frame(hsv: Hsv) -> bool {
-    hsv.h > 190.0 && hsv.h < 210.0 && hsv.s > 0.9 && hsv.v > 0.9
+    hsv.h > 180.0 && hsv.h < 210.0 && hsv.s > 0.8 && hsv.v > 0.8
 }
 
 fn is_sa_frame(hsv: Hsv) -> bool {
-    hsv.h > 210.0 && hsv.h < 230.0 && hsv.s > 0.9 && hsv.v > 0.9
+    hsv.h > 200.0 && hsv.h < 250.0 && hsv.s > 0.8 && hsv.v > 0.8
 }
 
 impl Hud for ManemonHud {
