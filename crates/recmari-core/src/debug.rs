@@ -74,7 +74,6 @@ impl DebugRenderer {
             draw_text_mut(img, TEXT_COLOR, x, y, scale, font, "HUD:none");
             return;
         };
-
         let hud_text = format!("HUD:{}", hud.hud_type());
         draw_text_mut(img, TEXT_COLOR, x, y, scale, font, &hud_text);
         y += TEXT_LINE_HEIGHT;
@@ -82,8 +81,11 @@ impl DebugRenderer {
         let p1 = fd.player1.as_ref().unwrap();
         let p2 = fd.player2.as_ref().unwrap();
 
-        let p1_text = format!("P1 HP:{:.0}%", p1.health_ratio * 100.0);
-        draw_text_mut(img, TEXT_COLOR, x, y, scale, font, &p1_text);
+        let p1_hp_text = match p1.health_ratio {
+            Some(hp) => format!("P1 HP:{:.0}%", hp * 100.0),
+            None => "P1 HP:--".to_string(),
+        };
+        draw_text_mut(img, TEXT_COLOR, x, y, scale, font, &p1_hp_text);
         y += TEXT_LINE_HEIGHT;
 
         if let Some(sa) = p1.sa_gauge {
@@ -96,8 +98,11 @@ impl DebugRenderer {
         draw_text_mut(img, TEXT_COLOR, x, y, scale, font, &p1_od_text);
         y += TEXT_LINE_HEIGHT;
 
-        let p2_text = format!("P2 HP:{:.0}%", p2.health_ratio * 100.0);
-        draw_text_mut(img, TEXT_COLOR, x, y, scale, font, &p2_text);
+        let p2_hp_text = match p2.health_ratio {
+            Some(hp) => format!("P2 HP:{:.0}%", hp * 100.0),
+            None => "P2 HP:--".to_string(),
+        };
+        draw_text_mut(img, TEXT_COLOR, x, y, scale, font, &p2_hp_text);
         y += TEXT_LINE_HEIGHT;
 
         if let Some(sa) = p2.sa_gauge {

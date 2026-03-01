@@ -55,7 +55,7 @@ message FrameData {
 message PlayerState {
   // Remaining health ratio. 1.0 = full, 0.0 = KO.
   // Computed from HP bar fill ratio via HSV color analysis.
-  double health_ratio = 1;
+  optional double health_ratio = 1;
 
   // SA (Super Art) gauge value. 0.0 = empty, 3.0 = full.
   // Computed from stock count (digit display) + gauge bar fill ratio.

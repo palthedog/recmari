@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
-use tracing::{info, warn};
+use tracing::info;
 
 use recmari_proto::proto::{
     source_metadata::Source, FrameData, Match, PlayerState, Round, SourceMetadata, VideoFileSource,
@@ -126,7 +126,7 @@ fn collect_frame_data(
         );
 
         let fd = if detected {
-            analyze_frame(&hud, &frame, &mut gap)
+            Some(analyze_frame(&hud, &frame, &mut gap))
         } else {
             gap.clear();
             None
@@ -154,30 +154,16 @@ fn collect_frame_data(
 }
 
 /// Read HP, SA, and OD from a detected HUD frame, applying gap-fill from previous readings.
-fn analyze_frame(
-    hud: &dyn Hud,
-    frame: &Frame,
-    gap: &mut GapFillState,
-) -> Option<FrameData> {
+fn analyze_frame(hud: &dyn Hud, frame: &Frame, gap: &mut GapFillState) -> FrameData {
     let hp = hud.analyze_hp(frame);
     let p1 = hp.p1.or(gap.p1_hp);
     let p2 = hp.p2.or(gap.p2_hp);
 
-    let (Some(p1), Some(p2)) = (p1, p2) else {
-        warn!(
-            frame_number = frame.frame_number,
-            p1_available = p1.is_some(),
-            p2_available = p2.is_some(),
-            "no HP data available yet, skipping"
-        );
-        return None;
-    };
-
     if hp.p1.is_some() {
-        gap.p1_hp = Some(p1);
+        gap.p1_hp = p1;
     }
     if hp.p2.is_some() {
-        gap.p2_hp = Some(p2);
+        gap.p2_hp = p2;
     }
 
     let sa = hud.analyze_sa(frame);
@@ -202,15 +188,15 @@ fn analyze_frame(
         gap.p2_od = p2_od;
     }
 
-    Some(FrameData {
+    FrameData {
         frame_number: frame.frame_number,
         timestamp_seconds: frame.timestamp_seconds,
         player1: Some(od_to_player_state(p1, p1_sa, p1_od)),
         player2: Some(od_to_player_state(p2, p2_sa, p2_od)),
-    })
+    }
 }
 
-fn od_to_player_state(hp: f64, sa: Option<f64>, od: Option<OdValue>) -> PlayerState {
+fn od_to_player_state(hp: Option<f64>, sa: Option<f64>, od: Option<OdValue>) -> PlayerState {
     let (od_gauge, burnout_gauge) = match od {
         Some(OdValue::Normal(v)) => (Some(v), None),
         Some(OdValue::Burnout(v)) => (None, Some(v)),
@@ -232,10 +218,7 @@ fn segment_into_match(frames: &[FrameData], input: &Path) -> Match {
         .map(|(i, f)| make_round(i as u32, f))
         .collect();
 
-    let start_seconds = frames
-        .first()
-        .map(|f| f.timestamp_seconds)
-        .unwrap_or(0.0);
+    let start_seconds = frames.first().map(|f| f.timestamp_seconds).unwrap_or(0.0);
 
     info!(round_count = rounds.len(), start_seconds, "match built");
 
@@ -260,23 +243,24 @@ fn split_into_rounds(frames: &[FrameData]) -> Vec<Vec<FrameData>> {
     let mut had_damage = false;
 
     for fd in frames {
-        let p1 = fd.player1.as_ref().unwrap().health_ratio;
-        let p2 = fd.player2.as_ref().unwrap().health_ratio;
+        let p1 = fd.player1.as_ref().and_then(|p| p.health_ratio);
+        let p2 = fd.player2.as_ref().and_then(|p| p.health_ratio);
 
-        if p1 < DAMAGE_THRESHOLD || p2 < DAMAGE_THRESHOLD {
-            had_damage = true;
-        }
+        if let (Some(p1), Some(p2)) = (p1, p2) {
+            if p1 < DAMAGE_THRESHOLD || p2 < DAMAGE_THRESHOLD {
+                had_damage = true;
+            }
 
-        let is_reset =
-            had_damage && p1 >= ROUND_RESET_THRESHOLD && p2 >= ROUND_RESET_THRESHOLD;
+            let is_reset = had_damage && p1 >= ROUND_RESET_THRESHOLD && p2 >= ROUND_RESET_THRESHOLD;
 
-        if is_reset {
-            info!(
-                at_frame = fd.frame_number,
-                p1, p2, "round boundary detected"
-            );
-            had_damage = false;
-            rounds.push(Vec::new());
+            if is_reset {
+                info!(
+                    at_frame = fd.frame_number,
+                    p1, p2, "round boundary detected"
+                );
+                had_damage = false;
+                rounds.push(Vec::new());
+            }
         }
 
         rounds.last_mut().unwrap().push(fd.clone());
@@ -303,13 +287,13 @@ mod tests {
             frame_number,
             timestamp_seconds: ts,
             player1: Some(PlayerState {
-                health_ratio: p1,
+                health_ratio: Some(p1),
                 sa_gauge: None,
                 od_gauge: None,
                 burnout_gauge: None,
             }),
             player2: Some(PlayerState {
-                health_ratio: p2,
+                health_ratio: Some(p2),
                 sa_gauge: None,
                 od_gauge: None,
                 burnout_gauge: None,
