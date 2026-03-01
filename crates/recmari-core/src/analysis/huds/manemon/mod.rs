@@ -276,6 +276,14 @@ mod tests {
 
     #[test]
     #[traced_test]
+    fn test_detect_hud_sa_highlighted() {
+        let frame = load_fixture_frame("p1_sa_highlighted.png");
+        let hud = ManemonHud::new(frame.image.width(), frame.image.height());
+        assert!(hud.detect_hud(&frame));
+    }
+
+    #[test]
+    #[traced_test]
     fn test_detect_hud_no_hud() {
         let frame = load_fixture_frame("no_hud.png");
         let hud = ManemonHud::new(frame.image.width(), frame.image.height());
