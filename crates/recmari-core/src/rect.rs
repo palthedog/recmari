@@ -32,7 +32,10 @@ impl PixelRect {
     /// Scale this rect from a reference resolution to a target resolution.
     pub fn scale_to(self, target_w: u32, target_h: u32, ref_w: u32, ref_h: u32) -> PixelRect {
         assert!(ref_w > 0 && ref_h > 0, "reference resolution must be > 0");
-        assert!(target_w > 0 && target_h > 0, "target resolution must be > 0");
+        assert!(
+            target_w > 0 && target_h > 0,
+            "target resolution must be > 0"
+        );
         PixelRect {
             x: (self.x as u64 * target_w as u64 / ref_w as u64) as u32,
             y: (self.y as u64 * target_h as u64 / ref_h as u64) as u32,
@@ -48,7 +51,12 @@ mod tests {
 
     #[test]
     fn scale_to_same_resolution() {
-        let r = PixelRect { x: 100, y: 50, w: 200, h: 30 };
+        let r = PixelRect {
+            x: 100,
+            y: 50,
+            w: 200,
+            h: 30,
+        };
         let scaled = r.scale_to(1920, 1080, 1920, 1080);
         assert_eq!(scaled.x, 100);
         assert_eq!(scaled.y, 50);
@@ -58,7 +66,12 @@ mod tests {
 
     #[test]
     fn scale_to_half_resolution() {
-        let r = PixelRect { x: 100, y: 40, w: 800, h: 20 };
+        let r = PixelRect {
+            x: 100,
+            y: 40,
+            w: 800,
+            h: 20,
+        };
         let scaled = r.scale_to(960, 540, 1920, 1080);
         assert_eq!(scaled.x, 50);
         assert_eq!(scaled.y, 20);
@@ -68,7 +81,12 @@ mod tests {
 
     #[test]
     fn normalized_to_pixel() {
-        let n = NormalizedRect { x: 0.5, y: 0.25, w: 0.1, h: 0.05 };
+        let n = NormalizedRect {
+            x: 0.5,
+            y: 0.25,
+            w: 0.1,
+            h: 0.05,
+        };
         let p = n.to_pixel_rect(1920, 1080);
         assert_eq!(p.x, 960);
         assert_eq!(p.y, 270);

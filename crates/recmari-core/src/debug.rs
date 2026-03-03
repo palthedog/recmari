@@ -3,7 +3,7 @@ use std::path::Path;
 use ab_glyph::{FontVec, PxScale};
 use anyhow::{Context, Result};
 use image::{Rgb, RgbImage};
-use imageproc::drawing::{draw_hollow_rect_mut, draw_text_mut};
+use imageproc::drawing::{draw_hollow_rect_mut, draw_line_segment_mut, draw_text_mut};
 use imageproc::rect::Rect;
 use tracing::{debug, info, warn};
 
@@ -34,6 +34,7 @@ impl DebugRenderer {
         frame: &Frame,
         hud: &dyn Hud,
         data: Option<&FrameData>,
+        center_x: Option<u32>,
         dir: &Path,
     ) -> Result<()> {
         let mut img = frame.image.clone();
@@ -44,7 +45,15 @@ impl DebugRenderer {
             draw_hollow_rect_mut(&mut img, rect, region.color);
         }
 
-        self.draw_text_overlay(&mut img, frame, hud, data);
+        if let Some(cx) = center_x {
+            let color = Rgb([255, 0, 255]);
+            let x = cx as f32;
+            draw_line_segment_mut(&mut img, (x, 150.0), (x, 860.0), color);
+            draw_line_segment_mut(&mut img, (x - 1.0, 150.0), (x - 1.0, 860.0), color);
+            draw_line_segment_mut(&mut img, (x + 1.0, 150.0), (x + 1.0, 860.0), color);
+        }
+
+        self.draw_text_overlay(&mut img, frame, hud, data, center_x);
 
         let path = dir.join(format!("frame_{:08}.png", frame.frame_number));
         img.save(&path)
@@ -60,6 +69,7 @@ impl DebugRenderer {
         frame: &Frame,
         hud: &dyn Hud,
         data: Option<&FrameData>,
+        center_x: Option<u32>,
     ) {
         let Some(font) = &self.font else { return };
         let scale = PxScale::from(TEXT_SCALE);
@@ -113,6 +123,12 @@ impl DebugRenderer {
 
         let p2_od_text = format_od_text("P2", p2.od_gauge, p2.burnout_gauge);
         draw_text_mut(img, TEXT_COLOR, x, y, scale, font, &p2_od_text);
+        y += TEXT_LINE_HEIGHT;
+
+        if let Some(cx) = center_x {
+            let center_text = format!("CTR:{cx}");
+            draw_text_mut(img, TEXT_COLOR, x, y, scale, font, &center_text);
+        }
     }
 
     fn load_font() -> Option<FontVec> {

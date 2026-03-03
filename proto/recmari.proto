@@ -79,4 +79,7 @@ message PlayerState {
   // Burnout recovery gauge. 0.0 = just entered burnout, 1.0 = fully recovered.
   // Absent when not in burnout.
   optional double burnout_gauge = 4;
+
+  // Whether the player is at the stage's corner.
+  optional bool at_stage_corner = 5;
 }

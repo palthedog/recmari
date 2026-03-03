@@ -20,10 +20,14 @@ fn probe(path: &Path) -> Result<ProbeResult> {
 
     let output = Command::new("ffprobe")
         .args([
-            "-v", "error",
-            "-select_streams", "v:0",
-            "-show_entries", "stream=width,height,r_frame_rate",
-            "-of", "csv=p=0",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height,r_frame_rate",
+            "-of",
+            "csv=p=0",
         ])
         .arg(path)
         .stdout(Stdio::piped())
@@ -51,13 +55,21 @@ fn probe(path: &Path) -> Result<ProbeResult> {
     let fps = if let Some((num, den)) = parts[2].split_once('/') {
         let num: f64 = num.parse().context("failed to parse fps numerator")?;
         let den: f64 = den.parse().context("failed to parse fps denominator")?;
-        if den > 0.0 { num / den } else { 0.0 }
+        if den > 0.0 {
+            num / den
+        } else {
+            0.0
+        }
     } else {
         parts[2].parse().context("failed to parse fps")?
     };
 
     if fps <= 0.0 {
-        warn!(fps, ?path, "video has non-positive fps, timestamps will be 0.0");
+        warn!(
+            fps,
+            ?path,
+            "video has non-positive fps, timestamps will be 0.0"
+        );
     }
 
     info!(width, height, fps, "probe completed");
@@ -82,10 +94,19 @@ impl VideoDecoder {
 
     /// Open a video file and seek to a specific frame before decoding.
     pub fn open_at_frame(path: &Path, start_frame: u32) -> Result<Self> {
-        assert!(path.exists(), "video file does not exist: {}", path.display());
+        assert!(
+            path.exists(),
+            "video file does not exist: {}",
+            path.display()
+        );
 
         let info = probe(path)?;
-        assert!(info.width > 0 && info.height > 0, "invalid video dimensions: {}x{}", info.width, info.height);
+        assert!(
+            info.width > 0 && info.height > 0,
+            "invalid video dimensions: {}x{}",
+            info.width,
+            info.height
+        );
 
         let seek_seconds = if start_frame > 0 && info.fps > 0.0 {
             start_frame as f64 / info.fps
@@ -93,7 +114,10 @@ impl VideoDecoder {
             0.0
         };
 
-        info!(?path, start_frame, seek_seconds, "spawning ffmpeg decoder process");
+        info!(
+            ?path,
+            start_frame, seek_seconds, "spawning ffmpeg decoder process"
+        );
 
         let mut cmd = Command::new("ffmpeg");
         if seek_seconds > 0.0 {
@@ -103,10 +127,7 @@ impl VideoDecoder {
             .args(["-i"])
             .arg(path)
             .args([
-                "-f", "rawvideo",
-                "-pix_fmt", "rgb24",
-                "-v", "error",
-                "pipe:1",
+                "-f", "rawvideo", "-pix_fmt", "rgb24", "-v", "error", "pipe:1",
             ])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

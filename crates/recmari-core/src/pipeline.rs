@@ -139,9 +139,15 @@ fn collect_frame_data(
             None
         };
 
+        let center_x = if detected {
+            hud.detect_center_line(&frame)
+        } else {
+            None
+        };
+
         if let (Some(renderer), Some(dir)) = (debug_renderer, &config.debug_frames_dir) {
             renderer
-                .save_frame(&frame, &hud, fd.as_ref(), dir)
+                .save_frame(&frame, &hud, fd.as_ref(), center_x, dir)
                 .context("failed to save debug frame")?;
         }
 
@@ -214,6 +220,7 @@ fn od_to_player_state(hp: Option<f64>, sa: Option<f64>, od: Option<OdValue>) -> 
         sa_gauge: sa,
         od_gauge,
         burnout_gauge,
+        at_stage_corner: None,
     }
 }
 
@@ -420,12 +427,14 @@ mod tests {
                 sa_gauge: None,
                 od_gauge: None,
                 burnout_gauge: None,
+                at_stage_corner: None,
             }),
             player2: Some(PlayerState {
                 health_ratio: Some(p2),
                 sa_gauge: None,
                 od_gauge: None,
                 burnout_gauge: None,
+                at_stage_corner: None,
             }),
         }
     }
@@ -525,12 +534,14 @@ mod tests {
                     sa_gauge: None,
                     od_gauge: None,
                     burnout_gauge: None,
+                    at_stage_corner: None,
                 }),
                 player2: Some(PlayerState {
                     health_ratio: None,
                     sa_gauge: None,
                     od_gauge: None,
                     burnout_gauge: None,
+                    at_stage_corner: None,
                 }),
             },
         ];

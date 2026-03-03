@@ -1,5 +1,6 @@
 mod hp;
 mod od;
+mod position;
 mod sa;
 
 pub use sa::{scan_sa_digit_probes, ProbeScanEntry};
@@ -41,6 +42,12 @@ pub struct ManemonHud {
 }
 
 impl ManemonHud {
+    /// Detect the training mode stage center line.
+    /// Returns the x-coordinate of the center line, or None if not visible.
+    pub fn detect_center_line(&self, frame: &Frame) -> Option<u32> {
+        position::detect_center_line(&frame.image)
+    }
+
     pub fn new(frame_width: u32, frame_height: u32) -> Self {
         assert!(
             frame_width == 1920 && frame_height == 1080,

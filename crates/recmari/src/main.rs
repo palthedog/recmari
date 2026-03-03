@@ -38,8 +38,7 @@ fn main() -> Result<()> {
                 debug_frames_dir: debug_frames,
             };
 
-            let matches =
-                pipeline::run_pipeline(&input, &config).context("pipeline failed")?;
+            let matches = pipeline::run_pipeline(&input, &config).context("pipeline failed")?;
 
             if matches.is_empty() {
                 warn!("no matches detected in video");
@@ -109,7 +108,11 @@ fn main() -> Result<()> {
 
 /// Serialize matches as length-delimited protobuf and write to file.
 fn write_matches(matches: &[Match], output: &Path) -> Result<()> {
-    info!(?output, match_count = matches.len(), "writing protobuf output");
+    info!(
+        ?output,
+        match_count = matches.len(),
+        "writing protobuf output"
+    );
 
     let mut buf = Vec::new();
     for m in matches {
@@ -118,8 +121,7 @@ fn write_matches(matches: &[Match], output: &Path) -> Result<()> {
     }
 
     if let Some(parent) = output.parent() {
-        std::fs::create_dir_all(parent)
-            .context("failed to create output directory")?;
+        std::fs::create_dir_all(parent).context("failed to create output directory")?;
     }
 
     std::fs::write(output, &buf)
