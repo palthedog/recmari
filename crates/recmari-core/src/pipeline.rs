@@ -139,7 +139,12 @@ fn collect_frame_data(
             None
         };
 
-        let center_x = if detected {
+        let any_ko = fd.as_ref().map_or(false, |fd| {
+            let p1 = fd.player1.as_ref().and_then(|p| p.health_ratio);
+            let p2 = fd.player2.as_ref().and_then(|p| p.health_ratio);
+            matches!(p1, Some(hp) if hp < 0.01) || matches!(p2, Some(hp) if hp < 0.01)
+        });
+        let center_x = if detected && !any_ko {
             hud.detect_center_line(&frame)
         } else {
             None
